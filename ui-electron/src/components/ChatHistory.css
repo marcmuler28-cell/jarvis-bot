@@ -1,0 +1,30 @@
+.chat-history {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.message {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.message-bubble {
+  max-width: 70%;
+  padding: 12px 18px;
+  border-radius: 20px;
+  background: #333;
+  word-wrap: break-word;
+}
+
+.message.user .message-bubble {
+  background: #007bff;
+}
+
+.message.assistant .message-bubble {
+  background: #28a745;
+}

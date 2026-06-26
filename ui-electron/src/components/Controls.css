@@ -1,0 +1,33 @@
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: flex-end;
+}
+
+.btn {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eaf6;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  font-size: 0.96rem;
+  min-width: 140px;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  transform: translateY(-1px);
+}
+
+.btn.secondary {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}

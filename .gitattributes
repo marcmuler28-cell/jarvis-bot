@@ -1,0 +1,2 @@
+# Evita shebang roto en Linux (error env: «bash\r») al editar en Windows
+*.sh text eol=lf

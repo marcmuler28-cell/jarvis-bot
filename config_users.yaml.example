@@ -1,0 +1,60 @@
+general:
+  min_confidence: 0.30
+  session_timeout_minutes: 30
+  unknown_user_can_chat: true
+  ask_identity_on_start: true
+  enrollment_phrases:
+    - "Hola Jarvis, soy Marc y esta es mi voz para que me identifiques cuando te hable"
+    - "Jarvis, reconóceme por mi voz, soy Marc y te pido que abras Firefox y reproduzcas música"
+    - "Mi nombre es Marc, mi voz es mi identificación, por favor escúchame con atención"
+    - "Hola Jarvis, soy yo Marc, te hablo para que registres mi voz en tu memoria"
+    - "Jarvis, mi voz es única, soy Marc, recuerda este tono para identificarme siempre"
+
+users:
+  marc:
+    name: "Marc"
+    display_name: "Marc 👑"
+    voice_profile: "marc_embedding.npy"
+    role: "admin"
+    pin: "CHANGE_ME"
+    permissions: ["*"]
+    denied_actions: []
+    game_time_limit_minutes: null
+
+  jefferson:
+    name: "Jefferson"
+    display_name: "Jefferson 🎮"
+    voice_profile: "jefferson_embedding.npy"
+    role: "limited"
+    pin: "CHANGE_ME"
+    permissions:
+      - "open_app"
+      - "spotify"
+      - "volume"
+      - "browser"
+      - "play_game"
+      - "weather"
+      - "notes"
+      - "reminders"
+    denied_actions:
+      - "poweroff"
+      - "reboot"
+      - "lock_session"
+      - "kill_process"
+      - "system_status"
+      - "open_terminal"
+      - "file_operations"
+    game_time_limit_minutes: 180
+    game_overload_protection:
+      warn_at_remaining_minutes: 30
+      close_games_gracefully: true
+      wait_before_shutdown_seconds: 30
+      shutdown_after_close: true
+
+  guest:
+    name: "Invitado"
+    display_name: "Invitado 👤"
+    role: "guest"
+    permissions: []
+    denied_actions: ["*"]
+    game_time_limit_minutes: 0

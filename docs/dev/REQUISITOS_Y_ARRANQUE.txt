@@ -1,0 +1,82 @@
+JarvisBot — requisitos y arranque al inicio (Linux / Arch)
+=========================================================
+
+1) Paquetes del sistema (terminal)
+----------------------------------
+  sudo pacman -S --needed python npm ffmpeg portaudio
+  optional:   sudo pacman -S --needed qt6-svg qt6-imageformats  # Quickshell HUD
+
+  Panel GPU/RAM (Quickshell), en repos extra:
+  sudo pacman -S quickshell
+
+2) Entorno Python (dentro de la carpeta JarvisBot)
+--------------------------------------------------
+  cd /ruta/a/JarvisBot
+  python -m venv venv_linux
+  source venv_linux/bin/activate
+  pip install --upgrade pip
+  pip install flask flask-socketio pyperclip sounddevice numpy faster-whisper llama-cpp-python
+  # Añade el resto que use tu proyecto (según imports en assistant.py / requirements si existen).
+
+3) Interfaz Electron (una sola vez, o tras cambiar dependencias)
+-------------------------------------------------------------------
+  cd ui-electron
+  npm install
+  npm run build
+
+4) Arranque al encender — elige UNA estrategia
+----------------------------------------------
+
+  A) RECOMENDADO (simple): solo sesión gráfica, sin systemd
+     - Electron arranca server.py (voz + API + Socket.IO) solo.
+     cd /ruta/a/JarvisBot
+     python install_linux_integration.py install --autostart
+     (Luego: cerrar sesión y volver a entrar, o ejecutar Jarvis desde el menú.)
+
+  B) systemd usuario + ventana al iniciar sesión (backend siempre activo)
+     systemctl --user disable --now jarvisbot-voice.service   # unidad obsoleta si existía
+     cd /ruta/a/JarvisBot
+     python install_linux_integration.py install --autostart --service
+     systemctl --user daemon-reload
+     systemctl --user enable --now jarvisbot.service
+     Las entradas de menú/autostart usan JARVIS_SKIP_BACKEND=1 para no duplicar server.py.
+
+5) Habilitar servicios de usuario al login (si usas la opción B)
+-----------------------------------------------------------------
+  loginctl enable-linger $USER    # opcional: servicios user antes del login gráfico
+
+6) Quickshell HUD (panel GPU) — opcional
+----------------------------------------
+  ~/.local/bin/gpu-jarvis-hud   o   quickshell -c gpu-jarvis
+  Config: ~/.config/quickshell/gpu-jarvis/
+
+7) Evita duplicar el servidor
+-------------------------------
+  - No ejecutes a la vez: jarvisbot.service  Y  Electron sin JARVIS_SKIP_BACKEND.
+  - jarvisbot-voice.service duplicaba el mismo server.py: deshabilitada ( ConditionPathExists ).
+
+8) Red al encender (Wi‑Fi / Ethernet) y antes de Jarvis
+---------------------------------------------------------
+  Linux ya conecta sola si la red está guardada como “conectar automáticamente”:
+    nmcli connection show
+    nmcli connection modify "NOMBRE_WIFI" connection.autoconnect yes
+
+  Para que systemd espere a tener red antes de targets “online” (útil para edge‑tts):
+    sudo systemctl enable NetworkManager-wait-online.service
+
+  jarvisbot.service incluye After=network-online.target : tras cambios:
+    systemctl --user daemon-reload && systemctl --user restart jarvisbot.service
+
+9) Panel Quickshell (métricas) — NO arranque automático por defecto
+---------------------------------------------------------------------
+  No deben estar en ~/.config/autostart/ (solo red + lo que configures tú).
+  Ábrelo por voz: “panel GPU”, “monitor de sistema”, … o a mano:
+    gpu-jarvis-hud
+
+  Ciérrelo por voz: “cierra las métricas”, “cierra hud”, …
+  También existe: ~/.local/share/applications/ para accesos desde el menú.
+
+10) Interfaz Jarvis (Electron) — igual, sin login automático si no quieres
+---------------------------------------------------------------------------
+  Quitar ~/.config/autostart/jarvisbot.desktop si existe y abrir desde:
+    Menú “JarvisBot” (~/.local/share/applications/jarvisbot.desktop)

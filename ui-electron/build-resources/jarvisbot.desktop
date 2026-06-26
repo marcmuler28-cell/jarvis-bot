@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=JarvisBot
+Comment=Asistente por voz con IA local
+Exec=AppRun
+Terminal=false
+Categories=Utility;AudioVideo;Development;
+StartupNotify=true
+StartupWMClass=JarvisBot
+Icon=jarvisbot

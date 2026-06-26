@@ -1,0 +1,127 @@
+# ====================================================
+# JARVIS BOT - .gitignore
+# ====================================================
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+*.pyc
+
+# === Entornos virtuales ===
+venv/
+venv_linux/
+.venv/
+env/
+env_linux/
+
+# === Node ===
+node_modules/
+ui-electron/node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# === Modelos de IA (MUY PESADOS - descargar aparte) ===
+models/*.gguf
+models/*.bin
+models/*.pkl
+models/*.pt
+models/*.pth
+models/*.h5
+models/*.onnx
+models/*.safetensors
+# Mantener solo README e indices de modelos
+!models/README.md
+!models/*.json
+
+# === Cachés de modelos ===
+models/.cache/
+
+# === Bases de datos locales (vectoriales, memoria, etc.) ===
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+chroma_rag_db/
+.jarvis/
+assistant_memory.db
+cache.db
+finetune_dataset.db
+
+# === Binarios compilados del proyecto (PyInstaller) ===
+/server
+/server.exe
+/server.pkg
+build/
+dist/
+ui-electron/build/
+ui-electron/dist/
+base_library.zip
+*.pyz
+*.toc
+Analysis-*.toc
+EXE-*.toc
+PKG-*.toc
+PYZ-*.toc
+
+# === Binarios descargables ===
+ngrok
+ngrok-v3-*
+*.tgz
+*.exe
+*.dll
+*.so
+*.dylib
+
+# === Audio de prueba ===
+*.wav
+*.mp3
+*.ogg
+*.flac
+
+# === Screenshots / imágenes de debug ===
+*.png
+!docs/**/*.png
+!ui-electron/public/**/*.png
+
+# === Logs y cachés ===
+*.log
+logs/
+.aider.*
+*.cache
+
+# === Secrets / Entorno ===
+.env
+.env.local
+*.env
+!.env.example
+
+# === Backups ===
+backup_*/
+*.bak
+*.bak.*
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Datos locales ===
+data/
+home/
+
+
+# === Personal config / session state (sensitive) ===
+config_users.yaml
+blackboard_state.json
+*.npy
+*.backup
+*.backup_*
+*.save

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>JarvisBot Button</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .drag-area {
+    width: 100%; height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+  }
+  .drag-area.dragging { cursor: grabbing; }
+
+  .walkie-btn {
+    width: 110px; height: 110px;
+    border-radius: 50%;
+    background: rgba(0, 20, 40, 0.75);
+    border: 2px solid rgba(0, 200, 255, 0.5);
+    color: #00c8ff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 9px;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 0 20px rgba(0, 180, 255, 0.2), inset 0 0 15px rgba(0, 200, 255, 0.05);
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    letter-spacing: 1px;
+    position: relative;
+    z-index: 5;
+  }
+  .walkie-btn:hover {
+    background: rgba(0,200,255,0.15);
+    border-color: rgba(0,200,255,0.8);
+    box-shadow: 0 0 30px rgba(0, 200, 255, 0.4);
+  }
+  .walkie-btn.pressed {
+    background: rgba(0,255,100,0.2);
+    border-color: #00ff64;
+    color: #00ff64;
+    animation: walkiePulse 1.2s ease-in-out infinite;
+  }
+  @keyframes walkiePulse {
+    0%,100% { box-shadow: 0 0 10px rgba(0,255,100,0.15); }
+    50% { box-shadow: 0 0 25px rgba(0,255,100,0.4); }
+  }
+
+  .pin-panel {
+    width: 240px; height: 320px;
+    background: rgba(10, 20, 40, 0.95);
+    border: 2px solid rgba(0, 200, 255, 0.6);
+    border-radius: 12px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 0 30px rgba(0, 200, 255, 0.3);
+    backdrop-filter: blur(10px);
+    z-index: 10;
+  }
+  .pin-title {
+    color: #00c8ff; font-size: 14px; letter-spacing: 2px; margin-bottom: 8px; font-weight: bold;
+  }
+  .pin-subtitle { color: #b0c4de; font-size: 10px; margin-bottom: 12px; }
+  .pin-display {
+    width: 100%; height: 50px; background: rgba(0,0,0,0.4);
+    border: 1px solid rgba(0,200,255,0.3); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: #00c8ff; font-size: 28px; font-family: monospace; letter-spacing: 12px; margin-bottom: 15px;
+  }
+  .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: 100%; }
+  .pin-btn {
+    background: rgba(0, 30, 60, 0.6); border: 1px solid rgba(0,200,255,0.3);
+    color: #00c8ff; font-size: 20px; font-weight: bold; padding: 12px;
+    border-radius: 8px; cursor: pointer; transition: all 0.1s;
+  }
+  .pin-btn:hover { background: rgba(0, 200, 255, 0.2); border-color: rgba(0, 200, 255, 0.8); }
+  .pin-btn:active { transform: scale(0.95); }
+  .pin-btn.action { background: rgba(255, 80, 80, 0.1); border-color: rgba(255, 80, 80, 0.3); color: #ff5050; }
+  .pin-btn.confirm { background: rgba(0, 255, 100, 0.1); border-color: rgba(0, 255, 100, 0.3); color: #00ff64; }
+
+  #atomCanvas { position: absolute; top: -15px; left: -15px; pointer-events: none; z-index: 1; }
+  .tooltip {
+    position: absolute; bottom: -28px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.85); color: #00c8ff; padding: 3px 8px; border-radius: 4px;
+    font-size: 9px; white-space: nowrap; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+    border: 1px solid rgba(0,200,255,0.4);
+  }
+  .drag-area:hover .tooltip { opacity: 1; }
+</style>
+</head>
+<body>
+  <div class="drag-area" id="dragArea">
+    <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+      <canvas id="atomCanvas" width="140" height="140"></canvas>
+
+      <div class="pin-panel" id="pinPanel" style="display: none;">
+        <div>
+          <div class="pin-title">🔒 INICIAR SESIÓN</div>
+          <div class="pin-subtitle">Ingresa tu PIN de 4 dígitos</div>
+        </div>
+        <div class="pin-display" id="pinDisplay">----</div>
+        <div class="pin-grid">
+          <button class="pin-btn" onclick="addPin('1')">1</button>
+          <button class="pin-btn" onclick="addPin('2')">2</button>
+          <button class="pin-btn" onclick="addPin('3')">3</button>
+          <button class="pin-btn" onclick="addPin('4')">4</button>
+          <button class="pin-btn" onclick="addPin('5')">5</button>
+          <button class="pin-btn" onclick="addPin('6')">6</button>
+          <button class="pin-btn" onclick="addPin('7')">7</button>
+          <button class="pin-btn" onclick="addPin('8')">8</button>
+          <button class="pin-btn" onclick="addPin('9')">9</button>
+          <button class="pin-btn action" onclick="clearPin()">C</button>
+          <button class="pin-btn" onclick="addPin('0')">0</button>
+          <button class="pin-btn confirm" onclick="submitPin()">✓</button>
+        </div>
+      </div>
+
+      <div class="walkie-btn" id="walkieBtn" style="display: none;">
+        <div class="btn-text" id="btnText">HABLAR</div>
+      </div>
+
+      <div class="tooltip" id="tooltip">Clic: Hablar · Clic der.: Dashboard · Arrastra: Mover</div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script>
+    const { ipcRenderer } = require('electron');
+    const socket = io('http://127.0.0.1:5000', {
+      autoConnect: true,
+      reconnection: true,
+      reconnectionAttempts: 100,  // Intentar 100 veces
+      reconnectionDelay: 2000,    // Cada 2 segundos
+      transports: ['polling', 'websocket']
+    });
+
+    const btn = document.getElementById('walkieBtn');
+    const btnText = document.getElementById('btnText');
+    const pinPanel = document.getElementById('pinPanel');
+    const pinDisplay = document.getElementById('pinDisplay');
+    const dragArea = document.getElementById('dragArea');
+
+    let isLoggedIn = false;
+    let currentPin = '';
+    let isPressed = false;
+    let isDragging = false;
+    let mouseDownTime = 0;
+    const DRAG_THRESHOLD_MS = 200;
+    const BUTTON_SIZE = 140;
+    const PIN_SIZE_W = 260;
+    const PIN_SIZE_H = 360;
+
+    function setStatus(status) {
+      btn.classList.remove('pressed');
+      if (status === 'escuchando') btn.classList.add('pressed');
+    }
+
+    function setText(html) { btnText.innerHTML = html; }
+
+    // === LÓGICA DE PIN ===
+    function showPinPanel() {
+      ipcRenderer.send('resize-button-window', PIN_SIZE_W, PIN_SIZE_H);
+      pinPanel.style.display = 'flex';
+      btn.style.display = 'none';
+      clearPin();
+    }
+
+    function hidePinPanel() {
+      ipcRenderer.send('resize-button-window', BUTTON_SIZE, BUTTON_SIZE);
+      pinPanel.style.display = 'none';
+      btn.style.display = 'flex';
+    }
+
+    function addPin(num) {
+      if (currentPin.length < 4) {
+        currentPin += num;
+        pinDisplay.textContent = '•'.repeat(currentPin.length) + '-'.repeat(4 - currentPin.length);
+      }
+      if (currentPin.length === 4) {
+        setTimeout(submitPin, 300);
+      }
+    }
+
+    function clearPin() {
+      currentPin = '';
+      pinDisplay.textContent = '----';
+      pinDisplay.style.color = '#00c8ff';
+    }
+
+    function submitPin() {
+      if (currentPin.length !== 4) return;
+      socket.emit('login_pin', { pin: currentPin });
+      pinDisplay.textContent = '...';
+      pinDisplay.style.color = '#ffc800';
+    }
+
+    socket.on('login_result', (data) => {
+      if (data.success) {
+        isLoggedIn = true;
+        hidePinPanel();
+        setText(data.display_name.split(' ')[0].toUpperCase());
+        setTimeout(() => { if (!isPressed) setText('HABLAR'); }, 2000);
+      } else {
+        pinDisplay.textContent = 'ERROR';
+        pinDisplay.style.color = '#ff5050';
+        setTimeout(() => { clearPin(); }, 1000);
+      }
+    });
+
+    // === ARRASTRE Y CLICS ===
+    document.addEventListener('mousedown', (e) => {
+      if (e.target.closest('.walkie-btn') || e.target.closest('.pin-panel') || e.target.tagName === 'BUTTON') {
+        return;
+      }
+      mouseDownTime = Date.now();
+      isDragging = false;
+      ipcRenderer.send('button-drag-start', e.clientX, e.clientY);
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (e.buttons !== 1) return;
+      const elapsed = Date.now() - mouseDownTime;
+      if (elapsed > DRAG_THRESHOLD_MS) {
+        isDragging = true;
+        dragArea.classList.add('dragging');
+        if (isPressed) stopListening();
+      }
+    });
+
+    document.addEventListener('mouseup', (e) => {
+      dragArea.classList.remove('dragging');
+      if (isDragging) {
+        ipcRenderer.send('button-drag-end');
+        isDragging = false;
+      }
+    });
+
+    // CLIC IZQUIERDO: Walkie Talkie
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // Si está arrastrando, ignorar
+      if (isDragging) return;
+
+      if (isPressed) {
+        stopListening();
+      } else {
+        startListening();
+      }
+    });
+
+    // CLIC DERECHO: Abrir/Cerrar Dashboard
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault(); // Evitar menú contextual por defecto
+      e.stopPropagation();
+      if (isDragging) return;
+
+      ipcRenderer.send('dashboard-toggle');
+      console.log('[BUTTON] Dashboard toggle (right click)');
+    });
+
+    // Registrar mousedown para arrastre
+    btn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      mouseDownTime = Date.now();
+      isDragging = false;
+    });
+
+    function startListening() {
+      if (isPressed) return;
+      isPressed = true;
+      btn.classList.add('pressed');
+      setText('HABLANDO<br>···');
+      socket.emit('walkie_talkie_start');
+    }
+
+    function stopListening() {
+      if (!isPressed) return;
+      isPressed = false;
+      btn.classList.remove('pressed');
+      setText('HABLAR');
+      socket.emit('walkie_talkie_stop');
+    }
+
+    socket.on('status', (data) => {
+      if (data && data.status) {
+        setStatus(data.status);
+        if (data.status === 'inactivo' && !isPressed) setText('HABLAR');
+      }
+    });
+
+    // === MINI ÁTOMO ANIMADO ===
+    const atomCanvas = document.getElementById('atomCanvas');
+    const atomCtx = atomCanvas.getContext('2d');
+    const atomW = 140, atomH = 140;
+    const acx = atomW / 2, acy = atomH / 2;
+    let atomT = 0;
+
+    const orbits = [
+      { a: 55, b: 22, speed: 0.025, tilt: 0, color: 'rgba(0,200,255,0.7)', alpha: 0.9, phase: 0 },
+      { a: 50, b: 20, speed: 0.03, tilt: Math.PI/3, color: 'rgba(0,255,150,0.6)', alpha: 0.7, phase: 2 },
+      { a: 45, b: 18, speed: 0.035, tilt: -Math.PI/3, color: 'rgba(150,200,255,0.5)', alpha: 0.5, phase: 4 },
+    ];
+
+    function drawMiniAtom() {
+      atomCtx.clearRect(0, 0, atomW, atomH);
+      atomT += 0.016;
+
+      const grad = atomCtx.createRadialGradient(acx, acy, 0, acx, acy, 12);
+      grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+      grad.addColorStop(0.4, 'rgba(0,200,255,0.7)');
+      grad.addColorStop(1, 'rgba(0,200,255,0)');
+      atomCtx.fillStyle = grad;
+      atomCtx.beginPath();
+      atomCtx.arc(acx, acy, 12, 0, Math.PI*2);
+      atomCtx.fill();
+
+      orbits.forEach((orb) => {
+        atomCtx.save();
+        atomCtx.translate(acx, acy);
+        atomCtx.rotate(orb.tilt);
+        atomCtx.strokeStyle = orb.color;
+        atomCtx.lineWidth = 0.6;
+        atomCtx.globalAlpha = orb.alpha * 0.4;
+        atomCtx.beginPath();
+        atomCtx.ellipse(0, 0, orb.a, orb.b, 0, 0, Math.PI*2);
+        atomCtx.stroke();
+
+        const angle = atomT * orb.speed * 60 + orb.phase;
+        const ex = Math.cos(angle) * orb.a;
+        const ey = Math.sin(angle) * orb.b;
+        const eg = atomCtx.createRadialGradient(ex, ey, 0, ex, ey, 5);
+        eg.addColorStop(0, '#fff');
+        eg.addColorStop(0.4, orb.color);
+        eg.addColorStop(1, 'rgba(0,200,255,0)');
+        atomCtx.globalAlpha = orb.alpha;
+        atomCtx.beginPath();
+        atomCtx.arc(ex, ey, 5, 0, Math.PI*2);
+        atomCtx.fillStyle = eg;
+        atomCtx.fill();
+        atomCtx.restore();
+      });
+
+      requestAnimationFrame(drawMiniAtom);
+    }
+    drawMiniAtom();
+
+    // Al iniciar, SIEMPRE mostrar panel de PIN
+    // (incluso si la ventana de Electron se reinicia sin cerrar la app)
+    setTimeout(showPinPanel, 500);
+
+    // Si el backend se desconecta, volver a pedir PIN
+    socket.on('disconnect', () => {
+      isLoggedIn = false;
+      showPinPanel();
+    });
+  </script>
+</body>
+</html>

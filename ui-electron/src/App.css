@@ -1,0 +1,293 @@
+/*
+ * Diseño inspirado pixel-a-pixel en jarvis_ai_voice_interface.html
+ * (negro HUD, monocromático cian, esquinas, ticks pequeños, tipografía Courier).
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #000;
+  font-family: 'Courier New', Courier, monospace;
+  color: rgba(230, 255, 255, 0.95);
+}
+
+.app {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  background: #000;
+}
+
+/* Contenedor = mismo papel que el #ui del HTML */
+#ui {
+  position: relative;
+  width: 100%;
+  height: min(92vh, 820px);
+  min-height: 560px;
+  max-width: 1180px;
+  margin: auto;
+  overflow: hidden;
+  background: #000;
+}
+
+#ui canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* HUD superpuesto al canvas como en jarvis_ai_voice_interface.html */
+.hud {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.corner {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border-color: rgba(0, 200, 255, 0.4);
+  border-style: solid;
+  border-width: 0;
+}
+
+.corner.tl {
+  top: 12px;
+  left: 12px;
+  border-top-width: 2px;
+  border-left-width: 2px;
+}
+
+.corner.tr {
+  top: 12px;
+  right: 12px;
+  border-top-width: 2px;
+  border-right-width: 2px;
+}
+
+.corner.bl {
+  bottom: 12px;
+  left: 12px;
+  border-bottom-width: 2px;
+  border-left-width: 2px;
+}
+
+.corner.br {
+  bottom: 12px;
+  right: 12px;
+  border-bottom-width: 2px;
+  border-right-width: 2px;
+}
+
+.label {
+  position: absolute;
+  font-size: 10px;
+  color: rgba(0, 200, 255, 0.6);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.label.tl {
+  top: 16px;
+  left: 78px;
+}
+
+.label.tr {
+  top: 16px;
+  right: 78px;
+  text-align: right;
+}
+
+.label.bl {
+  bottom: 16px;
+  left: 78px;
+}
+
+.label.br {
+  bottom: 16px;
+  right: 78px;
+  text-align: right;
+}
+
+.center-label {
+  position: absolute;
+  bottom: 90px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(0, 200, 255, 0.9);
+  letter-spacing: 4px;
+  text-align: center;
+  white-space: nowrap;
+  max-width: 94%;
+}
+
+.status-caption {
+  position: absolute;
+  bottom: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px;
+  max-width: 90%;
+  text-align: center;
+  letter-spacing: 0.5px;
+  color: rgba(160, 200, 220, 0.78);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status-bar {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) translateY(140px);
+  font-size: 9px;
+  color: rgba(0, 200, 255, 0.4);
+  letter-spacing: 3px;
+  text-align: center;
+}
+
+.tick {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  background: rgba(0, 200, 255, 0.5);
+  margin: 0 2px;
+  vertical-align: middle;
+  animation: hud-tick 1.4s ease-in-out infinite;
+}
+
+.tick:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.tick:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes hud-tick {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Ventana Electron flotante (Linux): tamaño menor, igual estética */
+html.jarvis-overlay,
+html.jarvis-overlay body,
+html.jarvis-overlay #root {
+  background: transparent !important;
+}
+
+html.jarvis-overlay .app {
+  width: 100%;
+  justify-content: flex-end;
+  align-items: stretch;
+  background: transparent !important;
+}
+
+html.jarvis-overlay #ui {
+  width: 100%;
+  height: min(94vh, 860px);
+  min-height: 520px;
+  max-width: none;
+  margin: 0 auto;
+  border-radius: 14px;
+  border: none;
+  box-shadow: 0 4px 40px rgba(0, 30, 60, 0.45);
+  background: transparent;
+  -webkit-app-region: drag;
+}
+
+html.jarvis-overlay #ui canvas {
+  pointer-events: none;
+  border-radius: 12px;
+}
+
+html.jarvis-overlay .status-caption {
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+html.jarvis-overlay .center-label {
+  -webkit-app-region: no-drag;
+}
+
+@media (max-width: 720px) {
+  .corner {
+    width: 48px;
+    height: 48px;
+  }
+  .center-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+}
+
+/* Botón Walkie-Talkie */
+.walkie-btn-wrapper {
+  position: absolute;
+  bottom: 160px;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  z-index: 10;
+  -webkit-app-region: no-drag;
+}
+.walkie-btn {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: 2px solid rgba(0,200,255,0.5);
+  background: rgba(0,200,255,0.08);
+  color: #00c8ff;
+  font-size: 11px;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: 'Courier New', monospace;
+  text-transform: uppercase;
+  pointer-events: auto;
+  outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  line-height: 1.3;
+}
+.walkie-btn:hover {
+  background: rgba(0,200,255,0.15);
+  border-color: rgba(0,200,255,0.8);
+}
+.walkie-btn:active,
+.walkie-btn.pressed {
+  background: rgba(0,255,100,0.2);
+  border-color: #00ff64;
+  color: #00ff64;
+  box-shadow: 0 0 30px rgba(0,255,100,0.3);
+  transform: scale(0.95);
+}
+.walkie-btn.pulse {
+  animation: walkiePulse 1.5s ease-in-out infinite;
+}
+@keyframes walkiePulse {
+  0%,100% { box-shadow:0 0 10px rgba(0,255,100,0.15); }
+  50% { box-shadow:0 0 25px rgba(0,255,100,0.4); }
+}

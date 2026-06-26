@@ -1,0 +1,76 @@
+{
+  "name": "jarvis-ui",
+  "version": "1.0.0",
+  "description": "Modern UI for Jarvis AI Assistant",
+  "author": "marcito234509 <marcito234509@gmail.com>",
+  "homepage": ".",
+  "main": "public/electron.js",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "electron": "electron .",
+    "electron-dev": "concurrently \"npm start\" \"wait-on http://localhost:3005 && electron .\"",
+    "electron-skip-backend": "JARVIS_SKIP_BACKEND=1 electron .",
+    "dist:linux": "electron-builder --linux AppImage",
+    "dist:linux:dir": "electron-builder --linux AppImage --dir",
+    "dist:linux:deb": "electron-builder --linux deb",
+    "package": "npm run build && electron-builder --linux AppImage",
+    "installer": "npm run build && node build-installer.js"
+  },
+  "dependencies": {
+    "concurrently": "^7.6.0",
+    "node-notifier": "^10.0.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "socket.io-client": "^4.7.0",
+    "wait-on": "^7.0.1"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^25.9.8",
+    "electron-builder": "^26.15.2",
+    "electron-packager": "^17.1.0",
+    "electron-winstaller": "^5.4.0"
+  },
+  "build": {
+    "appId": "com.jarvisbot.app",
+    "productName": "JarvisBot",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-resources"
+    },
+    "files": [
+      "build/**/*",
+      "public/electron.js",
+      "public/icon.png",
+      "public/index.html",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "maintainer": "marcito234509",
+      "category": "Utility",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  }
+}

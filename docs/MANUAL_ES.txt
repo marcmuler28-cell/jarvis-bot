@@ -1,0 +1,373 @@
+╔══════════════════════════════════════════════════════╗
+║                JARVIS BOT - MANUAL                   ║
+║          Asistente por voz con IA local              ║
+╚══════════════════════════════════════════════════════╝
+
+
+📁 ESTRUCTURA DE ARCHIVOS
+═══════════════════════════════════════════════════════
+
+1. server.py
+   - Servidor Flask + Socket.IO (backend HTTP)
+   - Maneja la interfaz web/Electron
+   - Ejecuta el bucle de voz (voice_loop)
+   - Recibe eventos del botón Walkie-Talkie
+   - Puerto: 5000
+
+2. assistant.py (~2200 líneas)
+   - Cerebro del asistente (ReActAgent)
+   - Procesa comandos de voz usando modelos de IA
+   - Conexión con herramientas del sistema
+   - Tiene SelfImprover (auto-aprendizaje)
+   - Llama a MemoryManager para recordar interacciones
+   - ✅ Clasificador contextual con LabelEncoder + RandomForest
+     • _predict_context_action() con safe_transform() para etiquetas nuevas
+     • Predicción genérica en _fast_path para comandos ambiguos
+     • Entrenamiento nocturno con ~/.jarvis/retrain_models.sh
+   - ✅ HealthMonitor para métricas de uso y tasa de éxito
+   - ✅ FileChangeHandler (watchdog) para monitoreo automático de archivos
+
+3. ui.py
+   - Interfaz de voz (VoiceInterface)
+   - Escucha micrófono con Faster-Whisper
+   - Convierte texto a voz (TTS) con edge-tts + mpv
+   - Métodos principales:
+     • listen(timeout=4) - Escucha y transcribe
+     • speak(texto) - Dice algo en voz alta
+
+4. utils.py
+   - Clase SystemTools (todas las herramientas)
+   - Métodos para abrir apps, archivos, controlar mouse,
+     Spotify, terminal, etc.
+   - ✅ Nuevas herramientas nativas Linux:
+     • set_brightness, get_brightness (brightnessctl)
+     • set_volume, get_volume (pactl)
+     • lock_session (loginctl)
+     • system_status, pending_updates (pacman)
+     • list_processes mejorado (top CPU/RAM)
+     • kill_process (con confirmación)
+   - ✅ _log_file_event() para registro de historial de archivos
+
+5. database.py
+   - Conexión a MySQL (localhost, root/<YOUR_MYSQL_PASSWORD>)
+   - Tablas: interactions, lessons, conflict_fixes
+   - Guarda memoria del asistente (conversaciones, lecciones)
+
+6. finetune_db.py + finetune_dataset.db
+   - Base SQLite para dataset de fine-tuning
+   - Tablas: failed_interactions, finetune_dataset
+   - Exportable a JSONL (ChatML) para QLoRA
+
+7. normalizer.py
+   - Normalizador de texto (tildes, artículos, ruido)
+   - Distancia Levenshtein para fuzzy matching
+   - Corrige errores de pronunciación ("spotifi" → "spotify")
+
+8. config.py
+   - Configuración de modelos de IA
+   - Variables de audio (dispositivos, sample rate)
+   - MODOS: TEXT_MODE (escribir en terminal) o VOZ
+
+9. main.py
+   - Punto de entrada alternativo (sin interfaz web)
+   - Arranca asistente completo desde terminal
+
+10. jarvis_ai_voice_interface.html
+    - Interfaz gráfica web (HTML+Canvas+Socket.IO)
+    - Animación de átomo + HUD
+    - Botón "PULSAR PARA HABLAR"
+
+11. ui-electron/
+    - Aplicación de escritorio (Electron + React)
+    - Carga server.py automáticamente
+    - Misma interfaz que el HTML pero como ventana nativa
+    - Para construir: cd ui-electron && npm run build
+
+12. planner.py (NUEVO)
+    - Planificador por recetas JSON
+    - RecipeLoader: carga/guarda/busca recetas en ~/.jarvis/recipes.json
+    - ParamExtractor: extrae parámetros con regex
+    - PlanExecutor: ejecuta pasos con precondiciones, recuperación y deshacer
+    - Archiva recetas no usadas tras 30 días
+
+13. rag.py (NUEVO)
+    - Sistema RAG con ChromaDB + Ollama (nomic-embed-text)
+    - Indexa documentos y recupera fragmentos relevantes
+    - Umbral de similitud dinámico (0.6)
+
+14. context_collector.py (NUEVO)
+    - Recolector de contexto para el clasificador
+    - get_active_window_kde() → ventana activa via D-Bus
+    - log_interaction() → guarda CSV en ~/.jarvis/logs/context_habits.csv
+
+15. health_monitor.py (NUEVO)
+    - HealthMonitor: registra métricas de uso
+      • total_requests, fast_path_hits, llm_calls
+      • llm_total_time, parse_retries
+      • actions_executed, actions_failed
+    - get_report() → informe de salud
+
+16. ~/.jarvis/retrain_models.sh
+    - Script de entrenamiento nocturno del clasificador contextual
+    - Lee ~/.jarvis/logs/context_habits.csv
+    - Entrena RandomForest con LabelEncoder
+    - Guarda modelo en ~/.jarvis/models/context_classifier.pkl
+    - ✅ Al terminar, apaga el sistema automáticamente
+    - Llamado desde "estudia tus lecciones y apágate"
+
+17. ~/.jarvis/recipes.json
+    - Recetas de automatización (organizar escritorio, limpiar descargas, etc.)
+
+18. ~/.jarvis/logs/planner.log
+    - Log detallado de ejecución de planes
+
+19. ~/.jarvis/file_history.json
+    - Historial de archivos (watchdog + registro manual)
+
+20. ~/.jarvis/task_notifier.sh
+    - Script de notificación de tareas próximas (Taskwarrior)
+
+
+🛠️ COMANDOS DISPONIBLES (Voz)
+═══════════════════════════════════════════════════════
+
+🎯 APPS Y SISTEMA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"abre [app]"                  → Abre aplicación (firefox, spotify, opera, etc.)
+"abre carpeta"                → Abre explorador de archivos
+"abre calculadora"            → Abre calculadora
+"abre terminal"               → Abre una terminal
+"abre terminal y [comando]"   → Abre terminal con comando
+"abre notas"                  → Abre editor de texto
+"cierra [app]"                → Cierra una aplicación
+"cómo está el sistema"        → Muestra CPU, RAM, disco
+"procesos que más consumen"   → Top 10 CPU o RAM
+"mata [proceso]"              → Termina un proceso (con confirmación)
+"actualizaciones pendientes"  → Ver paquetes de pacman
+"estado del servicio [nombre]"→ Estado de un servicio systemd
+
+🎛️ CONTROL DEL SISTEMA (LINUX)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"sube el brillo" / "baja el brillo"  → Ajusta brillo con brightnessctl
+"sube el volumen" / "baja el volumen" → Ajusta volumen con pactl
+"bloquea la sesión"                   → Bloquea la pantalla (loginctl)
+"apágate" / "reinicia el equipo"      → Apagar/reiniciar (con confirmación)
+
+📂 ARCHIVOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"crea carpeta [ruta]"         → Crea una carpeta
+"copia [src] a [dst]"         → Copia archivo
+"mueve [src] a [dst]"         → Mueve archivo
+"lista carpeta [ruta]"        → Lista contenido
+"escribe archivo [ruta], [contenido]" → Crea/escribe archivo
+"lee archivo [ruta]"          → Lee contenido de archivo
+
+🔍 BÚSQUEDA DE ARCHIVOS (HISTORIAL)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"dónde está [archivo]"        → Busca en el historial watchdog
+"qué archivos modifiqué ayer" → Muestra actividad reciente
+"busca archivo [nombre]"      → Búsqueda por nombre en el historial
+
+🎵 SPOTIFY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"abre spotify"                → Abre Spotify
+"play [canción]"              → Busca y reproduce canción
+"pon [playlist]"              → Reproduce playlist
+"pon tus me gusta"            → Reproduce canciones liked
+"abre playlists"              → Abre vista de playlists
+
+🖱️ MOUSE Y TECLADO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"mueve mouse a [x], [y]"      → Mueve cursor
+"clic" / "clic derecho"       → Clic izquierdo/derecho
+"doble clic"                  → Doble clic
+"escribe [texto]"             → Escribe texto
+"presiona [tecla]"            → Presiona tecla (enter, ctrl+c, etc.)
+"captura pantalla"            → Toma screenshot
+"arrastra de [x1],[y1] a [x2],[y2]" → Arrastrar y soltar
+
+💻 COMANDOS DE TERMINAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"ejecuta [comando]"           → Ejecuta en terminal (oculto)
+"ejecuta python [ruta]"       → Ejecuta script Python
+
+📋 TAREAS Y RECORDATORIOS (TASKWARRIOR)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"añade tarea [descripción]"           → Crea tarea simple
+"recuérdame [desc] el [día] a las [h]" → Crea tarea con fecha (parseo LLM)
+"muéstrame mis tareas"                → Lista tareas pendientes
+"marca como hecha la tarea [N]"       → Completa la tarea N
+
+🗂️ ORGANIZACIÓN Y PLANIFICADOR
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"organiza mi escritorio"       → Clasifica archivos en carpetas por tipo
+"limpia descargas"             → Mueve archivos antiguos de ~/Downloads
+"deshaz lo último"             → Revierte la última acción del plan
+"aprende nueva tarea"          → Modo guiado para crear una receta
+
+🎓 BLACKBOARD / CIBERTEC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"muestra mis notas"               → Ver notas de todos los cursos
+"muestra mis notas de [curso]"    → Ver notas de un curso específico
+"muestra mis horarios"            → Ver horario de clases
+"muestra horario de [curso]"      → Ver horario de un curso
+"mis tareas"                      → Ver tareas próximas a entregar
+"tareas de [curso]"               → Ver tareas de un curso
+"faltas"                          → Ver asistencias/faltas
+"promedio de [curso]"             → Ver promedio ponderado
+"ingresa a blackboard"            → Abrir Blackboard en el navegador
+"abre blackboard"                 → Abrir Blackboard en el navegador
+"ingresa a intranet"              → Abrir Intranet Cibertec
+"abre intranet"                   → Abrir Intranet Cibertec
+
+🧠 CLASIFICADOR CONTEXTUAL (PERSONALIZACIÓN)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"música" / "pon música"        → Predice Spotify, radio o local según hora
+"navegador"                    → Abre el navegador favorito según contexto
+"estudia tus lecciones y apágate" → Entrena RandomForest y apaga el PC
+
+📊 SALUD DEL ASISTENTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"cómo estás" / "estado" / "salud"  → Muestra métricas de uso
+
+❓ AYUDA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"qué comandos tienes"         → Muestra lista de capacidades
+"dime los comandos"           → Muestra resumen de lo que puede hacer
+"qué puedes hacer"            → Muestra lista de funciones disponibles
+
+
+🌐 CÓMO USAR
+═══════════════════════════════════════════════════════
+
+1. Iniciar servidor:
+   systemctl --user start jarvisbot.service
+   (O manual: cd /home/marc/Descargas/JarvisBot && python server.py)
+
+2. Abrir interfaz:
+   - Web: http://127.0.0.1:5000  (sirve HTML automáticamente)
+   - Electron: cd ui-electron && npm start
+
+3. Modo Walkie-Talkie (único modo):
+   - Presiona "PULSAR PARA HABLAR"
+   - Habla claro (espera 2-3 segundos procesando)
+   - Suelta el botón
+   - Jarvis responde en voz alta
+
+4. Ver logs:
+   journalctl --user -u jarvisbot.service -f
+
+5. Detener:
+   systemctl --user stop jarvisbot.service
+
+
+📦 DEPENDENCIAS PRINCIPALES
+═══════════════════════════════════════════════════════
+- Flask + Flask-SocketIO (servidor web)
+- faster-whisper (transcripción)
+- llama-cpp-python (modelo Qwen 3B/7B)
+- edge-tts + mpv (voz)
+- pygame (alternativa TTS)
+- MySQL / mysql-connector (memoria persistente)
+- SQLite3 (dataset fine-tuning)
+- pyautogui (control ratón/teclado)
+- socket.io-client (JS, interfaz web)
+- chromadb (base de conocimiento RAG)
+- pandas, scikit-learn (clasificador contextual)
+- dbus-python (ventana activa en KDE)
+- watchdog (monitoreo de archivos)
+- fuzzywuzzy (búsqueda difusa de recetas)
+- taskwarrior (gestión de tareas local)
+- brightnessctl, pactl, loginctl (herramientas nativas Linux)
+
+
+🔄 FLUJO DE FUNCIONAMIENTO
+═══════════════════════════════════════════════════════
+
+1. Usuario presiona botón → socket.emit('walkie_talkie_start')
+2. server.py activa walkie_active = True
+3. voice_loop llama a voice.listen(timeout=4)
+4. ui.py captura audio con sounddevice
+5. faster-whisper transcribe a texto
+6. server.py recibe el texto → agent.process(texto)
+7. assistant.py (ReActAgent):
+   a. normalizer.py corrige errores ("spotifi" → "spotify")
+   b. _fast_path() busca comandos directos (sin LLM):
+      • Predicción contextual con RandomForest (si aplica)
+      • Recetas del planificador (organizar, limpiar, etc.)
+      • Herramientas de sistema (brillo, volumen, etc.)
+      • Búsqueda en historial de archivos
+      • Tareas (Taskwarrior)
+      • Spotify, apps, mouse, etc.
+      • Si acierta → respuesta instantánea (<0.1s)
+   c. Si no acierta fast_path:
+      • Busca en conectores externos (RSS, clima, etc.)
+      • Si es tarea compleja → planificador por recetas
+      • Si es ambiguo → clasificador contextual
+   d. Si falla todo: registra en finetune_dataset.db
+   e. Qwen 3B/7B procesa con ReAct (Thought→Action→Observation)
+8. assistant.py devuelve respuesta + acciones
+9. Se registra la interacción en el historial de archivos (si aplica)
+10. Se registra en context_habits.csv (para el clasificador)
+11. server.py envía respuesta a interfaz (socket)
+12. server.py llama a voice.speak(respuesta) → TTS
+13. Usuario suelta botón → socket.emit('walkie_talkie_stop')
+14. walkie_active = False, vuelve a reposo
+
+
+🧠 SISTEMA DE APRENDIZAJE CONTINUO
+═══════════════════════════════════════════════════════
+
+Durante el día:
+- Cada interacción exitosa/fallida se guarda en ~/.jarvis/logs/context_habits.csv
+- El asistente registra: hora, día, ventana activa, comando, acción tomada, éxito
+- Las preferencias se guardan como lecciones en la base de datos
+
+Por la noche:
+- Al decir "estudia tus lecciones y apágate":
+  1. Se ejecuta ~/.jarvis/retrain_models.sh
+  2. Entrena un RandomForest con los datos del día
+  3. Guarda el modelo en ~/.jarvis/models/context_classifier.pkl
+  4. Apaga el sistema automáticamente
+- Al día siguiente, el asistente arranca con el nuevo modelo
+- Predice mejor tus intenciones según contexto (hora, app activa, día)
+
+
+📋 SISTEMA DE TAREAS (TASKWARRIOR)
+═══════════════════════════════════════════════════════
+
+- Las tareas se guardan localmente en ~/.task/
+- El asistente usa el LLM para extraer fecha de frases naturales
+- Un timer systemd (cada hora) verifica tareas próximas (<24h)
+- Las notificaciones usan notify-send (escritorio KDE)
+
+Comandos de terminal útiles:
+  task add "descripción" due:"YYYY-MM-DD HH:MM"
+  task next          → ver tareas pendientes
+  task done [N]      → marcar como hecha
+
+
+🗂️ PLANIFICADOR POR RECETAS
+═══════════════════════════════════════════════════════
+
+- Las recetas se guardan en ~/.jarvis/recipes.json
+- Cada receta tiene: intent, steps, preconditions, recovery, inverse
+- 20 recetas activas máximo
+- Las no usadas en 30 días se archivan en recipes.archive.json
+- Modo "aprende nueva tarea" guía al usuario paso a paso
+- "deshaz lo último" revierte la última acción ejecutada
+
+
+🔍 MEMORIA DE ARCHIVOS (WATCHDOG)
+═══════════════════════════════════════════════════════
+
+- Monitoreo automático de ~/Desktop, ~/Documents, ~/Downloads
+- Registro manual cuando el asistente abre/crea/mueve archivos
+- Historial en ~/.jarvis/file_history.json (máx. 300 eventos)
+- Consultable por voz: "dónde está...", "qué archivos modifiqué..."
+
+
+Ver estado	systemctl --user status jarvisbot.service
+Reiniciar	systemctl --user restart jarvisbot.service
+Ver logs en tiempo real	journalctl --user -u jarvisbot.service -f
+Últimas 30 líneas	journalctl --user -u jarvisbot.service -n 30

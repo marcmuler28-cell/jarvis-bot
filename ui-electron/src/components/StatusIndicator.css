@@ -1,0 +1,42 @@
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.95rem;
+  color: #d8dbe9;
+}
+
+.status-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  transition: all 0.25s ease;
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.status-circle.pulsing {
+  animation: pulse 1.4s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.2);
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 0.75;
+    box-shadow: 0 0 0 18px rgba(255, 255, 255, 0);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.status-text {
+  text-transform: capitalize;
+  letter-spacing: 0.04em;
+}

@@ -1,0 +1,860 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jarvis — Neural Interface</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+    }
+    body {
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #ui {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      position: relative;
+      overflow: hidden;
+      font-family: 'Courier New', monospace;
+      transition: background 0.4s ease, width 0.4s ease, height 0.4s ease, border-radius 0.4s ease;
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* Estado colapsado */
+    #ui.collapsed {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    /* Estado expandido (cuando NO está colapsado) */
+    #ui:not(.collapsed) {
+      background: #000;
+      pointer-events: auto;
+      border-radius: 12px;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      pointer-events: none;      /* ← ¡NUEVO! */
+    }
+
+    .hud { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+    .corner { position: absolute; width: 60px; height: 60px; border-color: rgba(0,200,255,0.4); border-style: solid; }
+    .tl { top: 12px; left: 12px; border-width: 2px 0 0 2px; }
+    .tr { top: 12px; right: 12px; border-width: 2px 2px 0 0; }
+    .bl { bottom: 12px; left: 12px; border-width: 0 0 2px 2px; }
+    .br { bottom: 12px; right: 12px; border-width: 0 2px 2px 0; }
+    .label { position: absolute; font-size: 10px; color: rgba(0,200,255,0.6); letter-spacing: 2px; text-transform: uppercase; }
+    .label.tl { top: 16px; left: 78px; }
+    .label.tr { top: 16px; right: 78px; text-align: right; }
+    .label.bl { bottom: 16px; left: 78px; }
+    .label.br { bottom: 16px; right: 78px; text-align: right; }
+    .center-label { position: absolute; bottom: 90px; left: 50%; transform: translateX(-50%); font-size: 11px; color: rgba(0,200,255,0.85); letter-spacing: 4px; text-align: center; white-space: nowrap; max-width: 95%; }
+    .status-caption { position: absolute; bottom: 52px; left: 50%; transform: translateX(-50%); font-size: 10px; color: rgba(160,200,220,0.75); text-align: center; max-width: 90%; letter-spacing: 0.5px; }
+    .status-bar { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) translateY(140px); font-size: 9px; color: rgba(0,200,255,0.4); letter-spacing: 3px; text-align: center; }
+
+    /* Botón PTT (siempre captura clics) */
+    .walkie-btn-wrapper {
+      position: absolute;
+      bottom: 160px;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: auto;
+      z-index: 10;
+    }
+    .walkie-btn {
+      width: 80px; height: 80px;
+      border-radius: 50%;
+      border: 2px solid rgba(0,200,255,0.5);
+      background: rgba(0, 20, 40, 0.75);
+      color: #00c8ff;
+      font-size: 11px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: 'Courier New', monospace;
+      text-transform: uppercase;
+      outline: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      line-height: 1.3;
+      pointer-events: auto;
+    }
+    .walkie-btn:hover { background: rgba(0,200,255,0.15); border-color: rgba(0,200,255,0.8); }
+    .walkie-btn:active, .walkie-btn.pressed {
+      background: rgba(0,255,100,0.2);
+      border-color: #00ff64;
+      color: #00ff64;
+      box-shadow: 0 0 30px rgba(0,255,100,0.3);
+      transform: scale(0.95);
+    }
+    .walkie-btn.pulse { animation: walkiePulse 1.5s ease-in-out infinite; }
+    @keyframes walkiePulse { 0%,100%{box-shadow:0 0 10px rgba(0,255,100,0.15)} 50%{box-shadow:0 0 25px rgba(0,255,100,0.4)} }
+
+    .tick { display: inline-block; width: 4px; height: 4px; background: rgba(0,200,255,0.5); margin: 0 2px; animation: tick 1.4s ease-in-out infinite; }
+    .tick:nth-child(2) { animation-delay: 0.2s; }
+    .tick:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes tick { 0%,100%{opacity:0.2} 50%{opacity:1} }
+
+    #ui.collapsed .corner,
+    #ui.collapsed .label,
+    #ui.collapsed .center-label,
+    #ui.collapsed .status-caption,
+    #ui.collapsed .status-bar,
+    #ui.collapsed .walkie-btn-wrapper {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Mini círculo (siempre captura clics) */
+    .mini-circle {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      border-radius: 50%;
+      background: rgba(0, 20, 40, 0.55);   /* ← fondo semi‑opaco imprescindible */
+      backdrop-filter: blur(12px);
+      border: 2px solid rgba(0, 200, 255, 0.5);
+      box-shadow: 0 0 20px rgba(0, 180, 255, 0.2), inset 0 0 15px rgba(0, 200, 255, 0.05);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      pointer-events: auto;                /* ← siempre cliqueable */
+      transition: opacity 0.3s;
+      z-index: 20;
+    }
+    #ui.collapsed .mini-circle,
+    #ui.stealth.collapsed .mini-circle {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* ← añade esto aquí */
+    #ui:not(.collapsed) .mini-circle {
+      pointer-events: none;
+    }
+
+    #miniCanvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      display: block;
+    }
+    .mini-circle::before {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 200, 255, 0.6);
+      animation: pulse-ring 2s ease-out infinite;
+    }
+    
+    @keyframes pulse-ring {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.15); opacity: 0; }
+    }
+    .mini-circle.listening::before { border-color: rgba(0, 255, 100, 0.8); }
+    .mini-circle.speaking::before { border-color: rgba(255, 200, 0, 0.8); }
+    .mini-circle.processing::before { border-color: rgba(255, 140, 0, 0.8); }
+
+    .mini-tooltip {
+      position: absolute;
+      bottom: -30px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      color: #00c8ff;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 30;
+      border: 1px solid rgba(0,200,255,0.4);
+    }
+    #ui.collapsed .mini-circle:hover .mini-tooltip,
+    #ui.stealth.collapsed .mini-circle:hover .mini-tooltip {
+      opacity: 1;
+    }
+
+    .history-float {
+      position: absolute;
+      bottom: 50%;
+      left: 50%;
+      transform: translate(-50%, 10px);
+      background: rgba(0,0,0,0.85);
+      border: 1px solid rgba(0,200,255,0.5);
+      border-radius: 8px;
+      padding: 8px 12px;
+      color: #0cf;
+      font-size: 9px;
+      width: 160px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 25;
+    }
+    #ui.collapsed .mini-circle:hover .history-float {
+      opacity: 1;
+    }
+
+    .speech-wave {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 0; height: 0;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 200, 255, 0.7);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      animation: speech-wave-out 0.8s ease-out forwards;
+    }
+    @keyframes speech-wave-out {
+      0% { width: 20px; height: 20px; opacity: 1; }
+      100% { width: 200px; height: 200px; opacity: 0; }
+    }
+
+    .notifications-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 100000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .notification {
+      background: rgba(0,20,40,0.9);
+      border: 1px solid #0cf;
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #0cf;
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      max-width: 220px;
+      backdrop-filter: blur(8px);
+      box-shadow: 0 0 15px rgba(0,200,255,0.2);
+      animation: slideIn 0.3s ease, fadeOut 0.5s 2.5s forwards;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .notification.success { border-color: #0f6; }
+    .notification.error { border-color: #f66; }
+    @keyframes slideIn {
+      from { transform: translateX(50px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes fadeOut {
+      to { opacity: 0; }
+    }
+  
+  /* Mini-circle y walkie button deshabilitados en modo wallpaper */
+  .mini-circle {
+    display: none !important;
+  }
+  .walkie-btn-wrapper {
+    display: none !important;
+  }
+</style>
+</head>
+<body>
+
+<div id="ui">
+  <canvas id="c"></canvas>
+  <div class="hud">
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+    <div class="label tl" id="lblSys">SYS // —</div>
+    <div class="label tr" id="lblVer">UI · BROWSER</div>
+    <div class="label bl" id="freq">FREQ — — —</div>
+    <div class="label br" id="clock">00:00:00</div>
+    <div class="center-label" id="centerLabel">CONECTANDO…</div>
+    <div class="status-caption" id="statusCaption">La palabra «Alexa» la escucha el servidor Python (server.py), no esta página.</div>
+    <div class="status-bar"><span class="tick"></span><span class="tick"></span><span class="tick"></span></div>
+    <div class="walkie-btn-wrapper">
+      <button class="walkie-btn" id="walkieBtn">PULSAR<br>PARA<br>HABLAR</button>
+    </div>
+  </div>
+  <div class="mini-circle" id="miniCircle">
+    <canvas id="miniCanvas"></canvas>
+    <div class="mini-tooltip">Jarvis — Pulsa para hablar</div>
+    <div class="history-float" id="historyFloat">
+      <div>« abre discord »</div>
+      <div style="color:#0f6;">✓ Discord abierto</div>
+    </div>
+  </div>
+  <div id="waveContainer" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></div>
+</div>
+
+<div class="notifications-container" id="notifications"></div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const ui = document.getElementById('ui');
+const centerLabel = document.getElementById('centerLabel');
+const statusCaption = document.getElementById('statusCaption');
+const lblSys = document.getElementById('lblSys');
+const miniCircle = document.getElementById('miniCircle');
+const waveContainer = document.getElementById('waveContainer');
+const historyFloat = document.getElementById('historyFloat');
+const notificationsContainer = document.getElementById('notifications');
+
+let W, H, cx, cy;
+function resizeMain() {
+  W = canvas.width = ui.clientWidth;
+  H = canvas.height = ui.clientHeight;
+  cx = W / 2; cy = H / 2;
+}
+resizeMain();
+window.addEventListener('resize', resizeMain);
+
+let t = 0;
+let energy = 0;
+let demoActive = true;
+let backendStatus = 'desconectado';
+let lastSimulatedCommand = 'abre discord';
+let lastSimulatedResponse = 'Discord abierto';
+
+const statusLabels = {
+  desconectado: 'OFFLINE',
+  conectando: 'CONECTANDO…',
+  inactivo: 'EN ESPERA',
+  escuchando: 'ESCUCHANDO',
+  procesando: 'PROCESANDO',
+  hablando: 'HABLANDO',
+};
+
+function statusToEnergy(st) {
+  switch (st) {
+    case 'escuchando': return 0.98;
+    case 'hablando': return 0.78;
+    case 'procesando': return 0.42;
+    case 'inactivo': return 0.22;
+    case 'desconectado': return 0.06;
+    default: return 0.18;
+  }
+}
+
+const orbits = [
+  { a: 88, b: 36, tilt: 0,    speed: 0.018, phase: 0,    color: '#00c8ff', alpha: 0.9 },
+  { a: 78, b: 32, tilt: 1.1,  speed: 0.013, phase: 2.1,  color: '#40e0ff', alpha: 0.7 },
+  { a: 95, b: 28, tilt: -0.6, speed: 0.022, phase: 4.2,  color: '#00a0e0', alpha: 0.6 },
+];
+
+const particles = [];
+for (let i = 0; i < 40; i++) {
+  particles.push({
+    angle: Math.random() * Math.PI * 2,
+    r: 115 + Math.random() * 70,
+    speed: (Math.random() - 0.5) * 0.004,
+    size: Math.random() * 1.5 + 0.3,
+    alpha: Math.random() * 0.5 + 0.1,
+    drift: Math.random() * 0.001,
+  });
+}
+
+function getEnergy() {
+  if (!demoActive) return statusToEnergy(backendStatus);
+  return 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(t * 0.8 + Math.sin(t * 0.3) * 2));
+}
+
+function drawHolographicAtom(e) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  const nr = 8 + e * 6;
+  ctx.save();
+  ctx.translate(1, 0);
+  const ngR = ctx.createRadialGradient(0,0,0,0,0,nr);
+  ngR.addColorStop(0, 'rgba(255,0,0,0.4)');
+  ngR.addColorStop(1, 'rgba(255,0,0,0)');
+  ctx.beginPath(); ctx.arc(0,0,nr,0,Math.PI*2);
+  ctx.fillStyle = ngR; ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(-1, 0);
+  const ngB = ctx.createRadialGradient(0,0,0,0,0,nr);
+  ngB.addColorStop(0, 'rgba(0,0,255,0.4)');
+  ngB.addColorStop(1, 'rgba(0,0,255,0)');
+  ctx.beginPath(); ctx.arc(0,0,nr,0,Math.PI*2);
+  ctx.fillStyle = ngB; ctx.fill();
+  ctx.restore();
+  const ng = ctx.createRadialGradient(0,0,0,0,0,nr);
+  ng.addColorStop(0, '#ffffff');
+  ng.addColorStop(0.3, '#80f0ff');
+  ng.addColorStop(0.7, '#00c8ff');
+  ng.addColorStop(1, 'rgba(0,180,255,0)');
+  ctx.beginPath(); ctx.arc(0,0,nr,0,Math.PI*2);
+  ctx.fillStyle = ng; ctx.fill();
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(-2, -2, nr*0.4, nr*0.2, 0.3, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
+
+function drawAtom(e) {
+  drawHolographicAtom(e);
+  orbits.forEach((orb) => {
+    const dynamicA = orb.a * (1 + e * 0.08);
+    const dynamicB = orb.b * (1 + e * 0.05);
+    const alpha = orb.alpha * (0.5 + e * 0.5);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(orb.tilt);
+    ctx.strokeStyle = orb.color;
+    ctx.lineWidth = 0.8;
+    ctx.globalAlpha = alpha * 0.55;
+    ctx.beginPath();
+    ctx.ellipse(0,0,dynamicA,dynamicB,0,0,Math.PI*2);
+    ctx.stroke();
+    ctx.globalAlpha = alpha;
+    const angle = t * orb.speed * (60 * 0.016) + orb.phase;
+    const ex = Math.cos(angle) * dynamicA;
+    const ey = Math.sin(angle) * dynamicB;
+    const eg = ctx.createRadialGradient(ex,ey,0,ex,ey,7+e*5);
+    eg.addColorStop(0, '#fff');
+    eg.addColorStop(0.3, orb.color);
+    eg.addColorStop(1, 'rgba(0,200,255,0)');
+    ctx.beginPath(); ctx.arc(ex,ey,7+e*5,0,Math.PI*2);
+    ctx.fillStyle = eg; ctx.fill();
+    const trailLen = 30;
+    for (let j = 1; j <= trailLen; j++) {
+      const ta = angle - (j / trailLen) * 0.8;
+      const tx2 = Math.cos(ta) * dynamicA;
+      const ty2 = Math.sin(ta) * dynamicB;
+      ctx.beginPath();
+      ctx.arc(tx2, ty2, (1-j/trailLen)*3, 0, Math.PI*2);
+      ctx.globalAlpha = alpha * (1-j/trailLen) * 0.6;
+      ctx.fillStyle = orb.color;
+      ctx.fill();
+    }
+    ctx.restore();
+  });
+}
+
+function drawParticles(e) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  particles.forEach(p => {
+    p.angle += p.speed + p.drift * e * 3;
+    const x = Math.cos(p.angle) * p.r;
+    const y = Math.sin(p.angle) * p.r * 0.4;
+    ctx.globalAlpha = p.alpha * (0.5 + e * 0.5);
+    ctx.fillStyle = '#00c8ff';
+    ctx.beginPath(); ctx.arc(x, y, p.size, 0, Math.PI*2);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawRings(e) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  const radii = [130, 160, 195];
+  radii.forEach((r, i) => {
+    const alpha = (0.05 + e * 0.12) * (1 - i * 0.25);
+    ctx.strokeStyle = '#00c8ff';
+    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = alpha;
+    ctx.setLineDash([4, 8]);
+    ctx.lineDashOffset = -t * (i % 2 === 0 ? 0.3 : -0.3);
+    ctx.beginPath(); ctx.arc(0,0,r,0,Math.PI*2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
+  ctx.restore();
+}
+
+function drawScanLine() {
+  const y = cy + Math.sin(t * 0.3) * 80;
+  const grad = ctx.createLinearGradient(0, y-1, 0, y+1);
+  grad.addColorStop(0, 'rgba(0,200,255,0)');
+  grad.addColorStop(0.5, `rgba(0,200,255,${0.04 + energy * 0.06})`);
+  grad.addColorStop(1, 'rgba(0,200,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, y-1, W, 2);
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(0,100,140,0.07)';
+  ctx.lineWidth = 0.5;
+  const step = 40;
+  for (let x = 0; x < W; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+}
+
+let fakeVoiceBars = new Array(40).fill(0);
+function updateFakeVoice() {
+  const targetEnergy = energy;
+  for (let i = 0; i < fakeVoiceBars.length; i++) {
+    const noise = (Math.random() - 0.5) * 0.3;
+    const target = targetEnergy * (0.3 + 0.7 * Math.sin(i * 0.5 + t * 2));
+    fakeVoiceBars[i] += (target - fakeVoiceBars[i]) * 0.15 + noise;
+    fakeVoiceBars[i] = Math.max(0, Math.min(1, fakeVoiceBars[i]));
+  }
+}
+function drawVoiceVisualizer(e) {
+  if (e < 0.1) return;
+  updateFakeVoice();
+  ctx.save();
+  ctx.translate(cx, cy + 155);
+  const barWidth = 120 / fakeVoiceBars.length;
+  ctx.fillStyle = 'rgba(0,200,255,0.7)';
+  for (let i = 0; i < fakeVoiceBars.length; i++) {
+    const h = fakeVoiceBars[i] * 20 * e;
+    ctx.fillRect(i * barWidth - 60, -h/2, barWidth-1, h);
+  }
+  ctx.restore();
+}
+
+function drawWaveform(e) {
+  drawVoiceVisualizer(e);
+}
+
+// ==================== MINI ÁTOMO ====================
+const miniCanvas = document.getElementById('miniCanvas');
+const mctx = miniCanvas.getContext('2d');
+function resizeMini() {
+  const size = ui.classList.contains('stealth') ? 60 : 80;
+  miniCanvas.width = size;
+  miniCanvas.height = size;
+}
+resizeMini();
+
+const miniParticles = [];
+for (let i=0;i<5;i++) {
+  miniParticles.push({
+    angle: Math.random()*Math.PI*2,
+    r: 28 + Math.random()*6,
+    speed: (Math.random()-0.5)*0.01,
+    size: Math.random()*0.5+0.2,
+    alpha: 0.5
+  });
+}
+
+function getNucleusPulse(state, time) {
+  switch (state) {
+    case 'inactivo':
+    case 'desconectado':
+      return 1 + Math.sin(time * 2.1) * 0.08;
+    case 'escuchando':
+      return 1 + Math.sin(time * 15) * 0.15;
+    case 'procesando':
+      return 1 + Math.sin(time * 10) * 0.1;
+    case 'hablando':
+      return 1 + Math.sin(time * 30) * 0.25;
+    default:
+      return 1;
+  }
+}
+
+function drawMiniAtom(e, status) {
+  const w = miniCanvas.width, h = miniCanvas.height;
+  const mcx = w/2, mcy = h/2;
+  mctx.clearRect(0,0,w,h);
+  mctx.save();
+  mctx.translate(mcx, mcy);
+
+  const miniOrbits = [
+    { a: 22, b: 9, tilt: 0.3, speed: 0.03, phase: 0 },
+    { a: 24, b: 8, tilt: -0.5, speed: -0.025, phase: 2.5 },
+  ];
+  miniOrbits.forEach(o => {
+    mctx.save();
+    mctx.rotate(o.tilt);
+    mctx.strokeStyle = 'rgba(0,200,255,0.7)';
+    mctx.lineWidth = 0.7;
+    mctx.beginPath();
+    mctx.ellipse(0,0, o.a, o.b, 0,0, Math.PI*2);
+    mctx.stroke();
+    const angle = t * o.speed * (60 * 0.016) + o.phase;
+    const ex = Math.cos(angle) * o.a;
+    const ey = Math.sin(angle) * o.b;
+    mctx.beginPath();
+    mctx.arc(ex, ey, 2, 0, Math.PI*2);
+    mctx.fillStyle = '#0cf';
+    mctx.fill();
+    mctx.restore();
+  });
+
+  miniParticles.forEach(p => {
+    p.angle += p.speed;
+    const px = Math.cos(p.angle) * p.r;
+    const py = Math.sin(p.angle) * p.r * 0.5;
+    mctx.globalAlpha = p.alpha * (0.6 + e * 0.4);
+    mctx.fillStyle = '#0cf';
+    mctx.beginPath(); mctx.arc(px, py, p.size, 0, Math.PI*2); mctx.fill();
+  });
+  mctx.globalAlpha = 1;
+
+  const pulse = getNucleusPulse(status, t);
+  const nr = (3 + e * 2) * pulse;
+  const ng = mctx.createRadialGradient(0,0,0,0,0,nr);
+  ng.addColorStop(0, '#ffffff');
+  ng.addColorStop(0.4, '#80f0ff');
+  ng.addColorStop(1, 'rgba(0,200,255,0)');
+  mctx.beginPath(); mctx.arc(0,0, nr, 0, Math.PI*2);
+  mctx.fillStyle = ng; mctx.fill();
+
+  if (status === 'escuchando' || status === 'hablando') {
+    mctx.beginPath();
+    mctx.arc(0, 0, 2.5, 0, Math.PI*2);
+    mctx.fillStyle = '#00ff64';
+    mctx.fill();
+    mctx.shadowColor = '#00ff64';
+    mctx.shadowBlur = 6;
+    mctx.fill();
+    mctx.shadowBlur = 0;
+    mctx.shadowColor = 'transparent';
+  }
+
+  mctx.restore();
+}
+
+// ==================== BUCLE PRINCIPAL ====================
+let frameCount = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  t += 0.016;
+  frameCount++;
+  energy = getEnergy();
+
+  if (!ui.classList.contains('collapsed')) {
+    ctx.clearRect(0,0,W,H);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0,0,W,H);
+    drawGrid();
+    drawScanLine();
+    drawRings(energy);
+    drawParticles(energy);
+    drawAtom(energy);
+    drawWaveform(energy);
+  }
+
+  drawMiniAtom(energy, backendStatus);
+
+  if (frameCount % 30 === 0) {
+    const f = Math.floor(800 + energy * 2400);
+    document.getElementById('freq').textContent = `FREQ ${f} Hz`;
+    const d = new Date();
+    document.getElementById('clock').textContent = d.toTimeString().slice(0,8);
+  }
+}
+loop();
+
+// ==================== COLAPSO / EXPANSIÓN ====================
+function expandUI() {
+  ui.classList.remove('collapsed', 'stealth');
+  resizeMain();
+  resizeMini();
+}
+function collapseUI() {
+  ui.classList.add('collapsed');
+  ui.classList.remove('stealth');
+  resizeMini();
+  resizeMain();
+}
+function setMiniRingClass(status) {
+  miniCircle.classList.remove('listening', 'speaking', 'processing');
+  if (status === 'escuchando') miniCircle.classList.add('listening');
+  else if (status === 'hablando') miniCircle.classList.add('speaking');
+  else if (status === 'procesando') miniCircle.classList.add('processing');
+}
+
+function emitSpeechWave() {
+  const wave = document.createElement('div');
+  wave.className = 'speech-wave';
+  waveContainer.appendChild(wave);
+  wave.addEventListener('animationend', () => wave.remove());
+}
+
+function showNotification(message, type = 'success') {
+  const notif = document.createElement('div');
+  notif.className = `notification ${type}`;
+  notif.innerHTML = type === 'success' ? `✓ ${message}` : `⚠ ${message}`;
+  notificationsContainer.appendChild(notif);
+  setTimeout(() => notif.remove(), 3000);
+}
+
+function updateHistory(command, response) {
+  lastSimulatedCommand = command;
+  lastSimulatedResponse = response;
+  historyFloat.innerHTML = `<div>« ${command} »</div><div style="color:#0f6;">✓ ${response}</div>`;
+}
+
+// Clic en el mini-círculo para expandir
+document.querySelector('.mini-circle').addEventListener('click', (e) => {
+  e.stopPropagation();
+  expandUI();
+});
+
+// Modo wallpaper: SIEMPRE pantalla completa, sin colapsar
+// El botón walkie está en ventana separada
+window.addEventListener('load', () => {
+  // Asegurar que NO esté colapsado
+  ui.classList.remove('collapsed', 'stealth');
+  console.log('[WALLPAPER] Modo wallpaper activo (pantalla completa, sin colapso)');
+});
+
+// ==================== SOCKET.IO ====================
+(function connectSocket() {
+  if (typeof io === 'undefined') {
+    centerLabel.textContent = 'SIN SOCKET.IO';
+    statusCaption.textContent = 'Carga socket.io (CDN) o usa la app Electron en ui-electron.';
+    lblSys.textContent = 'SYS // ERROR';
+    return;
+  }
+  const socket = io('http://127.0.0.1:5000', {
+    autoConnect: true,
+    reconnectionAttempts: 20,
+    reconnectionDelay: 1000,
+    transports: ['polling', 'websocket'],
+  });
+
+  socket.on('connect', () => {
+    demoActive = false;
+    backendStatus = 'inactivo';
+    lblSys.textContent = 'SYS // ONLINE';
+    centerLabel.textContent = statusLabels.inactivo;
+    socket.emit('client_ready');
+    statusCaption.textContent = 'Conectado al servidor. «Alexa»/«Jarvis» se procesan en Python; esta vista solo refleja estado.';
+    setMiniRingClass('inactivo');
+  });
+
+  socket.on('disconnect', () => {
+    demoActive = true;
+    backendStatus = 'desconectado';
+    lblSys.textContent = 'SYS // OFFLINE';
+    centerLabel.textContent = statusLabels.desconectado;
+    statusCaption.textContent = 'Sin conexión a http://127.0.0.1:5000 — ¿jarvisbot.service activo?';
+    setMiniRingClass('desconectado');
+  });
+
+  socket.on('connect_error', () => {
+    lblSys.textContent = 'SYS // —';
+    centerLabel.textContent = 'NO HAY SERVIDOR';
+    statusCaption.textContent = 'Arranca server.py (o systemctl --user start jarvisbot). Si abriste como file://, prueba: python -m http.server en esta carpeta.';
+  });
+
+  socket.on('status', (data) => {
+    if (data && data.status) {
+      backendStatus = data.status;
+      centerLabel.textContent = statusLabels[data.status] || data.status.toUpperCase();
+      setMiniRingClass(data.status);
+      if (data.status === 'hablando') emitSpeechWave();
+      // En modo wallpaper NO cambiamos el estado de colapso (siempre expandido)
+      // Solo actualizamos los indicadores visuales de status
+    }
+  });
+
+  socket.on('message', (data) => {
+    if (data && data.text) {
+      statusCaption.textContent = data.text.length > 180 ? data.text.slice(0, 177) + '…' : data.text;
+    }
+  });
+
+  socket.on('command_result', (data) => {
+    if (data) {
+      updateHistory(data.command, data.response);
+      showNotification(data.response, data.success ? 'success' : 'error');
+    }
+  });
+
+  const btn = document.getElementById('walkieBtn');
+  let isPressed = false;
+  let lastStart = 0;
+  let lastStop = 0;
+  let cooldownUntil = 0;
+  const DEBOUNCE_MS = 300;
+  const COOLDOWN_MS = 2000;
+
+  function startListening() {
+    const now = Date.now();
+    if (now - lastStart < DEBOUNCE_MS) return;
+    if (now < cooldownUntil) {
+      statusCaption.textContent = 'Enfriando... ' + Math.ceil((cooldownUntil - now)/1000) + 's';
+      return;
+    }
+    if (isPressed) return;
+    isPressed = true;
+    lastStart = now;
+    expandUI();
+    btn.classList.add('pressed', 'pulse');
+    btn.innerHTML = 'HABLANDO<br>···';
+    centerLabel.textContent = 'WALKIE-TALKIE';
+    statusCaption.textContent = 'Mantén presionado para hablar. Suelta para terminar.';
+    socket.emit('walkie_talkie_start');
+  }
+  function stopListening() {
+    const now = Date.now();
+    if (now - lastStop < DEBOUNCE_MS) return;
+    if (!isPressed) return;
+    isPressed = false;
+    lastStop = now;
+    btn.classList.remove('pressed', 'pulse');
+    btn.innerHTML = 'PULSAR<br>PARA<br>HABLAR';
+    socket.emit('walkie_talkie_stop');
+    // Colapsar inmediatamente a mini-circle tras soltar el botón
+    clearTimeout(window.collapseTimeout);
+    window.collapseTimeout = setTimeout(() => {
+      collapseUI();
+      console.log('[UI] Colapsado a mini-circle tras soltar botón');
+    }, 500);  // 0.5s de gracia para ver la respuesta
+  }
+  socket.on('listen_error', (data) => {
+    console.error('[JARVIS] listen_error:', data);
+    isPressed = false;
+    cooldownUntil = Date.now() + COOLDOWN_MS;
+    btn.classList.remove('pressed', 'pulse');
+    btn.classList.add('error');
+    btn.innerHTML = 'ERROR<br>···';
+    statusCaption.textContent = 'Error de micrófono: ' + (data?.error || 'desconocido') + '. Espera ' + (COOLDOWN_MS/1000) + 's.';
+    setTimeout(() => {
+      btn.classList.remove('error');
+      btn.innerHTML = 'PULSAR<br>PARA<br>HABLAR';
+      statusCaption.textContent = 'Listo. Presiona para hablar.';
+    }, COOLDOWN_MS);
+  });
+  btn.addEventListener('mousedown', startListening);
+  btn.addEventListener('mouseup', stopListening);
+  btn.addEventListener('mouseleave', () => { if (isPressed) stopListening(); });
+  btn.addEventListener('touchstart', (e) => { e.preventDefault(); startListening(); });
+  btn.addEventListener('touchend', (e) => { e.preventDefault(); stopListening(); });
+  btn.addEventListener('touchcancel', (e) => { e.preventDefault(); stopListening(); });
+})();
+
+new ResizeObserver(() => { resizeMain(); resizeMini(); }).observe(ui);
+</script>
+</body>
+</html>

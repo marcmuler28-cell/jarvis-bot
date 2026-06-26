@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<title>JarvisBot Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100vw; height: 100vh;
+    overflow: hidden;
+    background: linear-gradient(135deg, #0a0a1a 0%, #0d1525 50%, #0a0a1a 100%);
+    color: #e0e8ff;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    user-select: none;
+  }
+
+  /* === HEADER === */
+  .header {
+    position: fixed; top: 0; left: 0; right: 0;
+    height: 60px;
+    background: rgba(0, 20, 40, 0.9);
+    border-bottom: 1px solid rgba(0, 200, 255, 0.3);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 30px;
+    backdrop-filter: blur(10px);
+    z-index: 100;
+  }
+  .header h1 {
+    color: #00c8ff; font-size: 1.4rem; letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(0, 200, 255, 0.5);
+  }
+  .header .clock {
+    color: #00c8ff; font-family: monospace; font-size: 1.2rem;
+  }
+  .close-btn {
+    background: rgba(255, 80, 80, 0.2);
+    border: 1px solid rgba(255, 80, 80, 0.5);
+    color: #ff5050;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+  }
+  .close-btn:hover { background: rgba(255, 80, 80, 0.4); }
+
+  /* === GRID === */
+  .grid {
+    padding: 80px 30px 30px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    height: calc(100vh - 60px);
+    overflow-y: auto;
+  }
+
+  /* === CARDS === */
+  .card {
+    background: rgba(0, 20, 40, 0.6);
+    border: 1px solid rgba(0, 200, 255, 0.2);
+    border-radius: 12px;
+    padding: 20px;
+    backdrop-filter: blur(8px);
+    transition: all 0.3s;
+  }
+  .card:hover {
+    border-color: rgba(0, 200, 255, 0.5);
+    box-shadow: 0 0 20px rgba(0, 200, 255, 0.15);
+  }
+  .card h2 {
+    color: #00c8ff; font-size: 0.85rem;
+    letter-spacing: 2px; text-transform: uppercase;
+    margin-bottom: 15px; padding-bottom: 10px;
+    border-bottom: 1px solid rgba(0, 200, 255, 0.2);
+  }
+
+  /* === SESSION CARD === */
+  .session-user {
+    font-size: 1.8rem; font-weight: bold;
+    color: #00ff64;
+    text-shadow: 0 0 15px rgba(0, 255, 100, 0.4);
+    margin-bottom: 8px;
+  }
+  .session-user.no-auth { color: #ff5050; text-shadow: 0 0 15px rgba(255, 80, 80, 0.4); }
+  .session-detail { font-size: 0.85rem; color: #b0c4de; margin: 4px 0; }
+  .session-detail strong { color: #00c8ff; }
+
+  /* === METRICS === */
+  .metric { display: flex; justify-content: space-between; margin: 8px 0; font-size: 0.9rem; }
+  .metric-label { color: #b0c4de; }
+  .metric-value { color: #00c8ff; font-family: monospace; font-weight: bold; }
+  .metric-value.good { color: #00ff64; }
+  .metric-value.warn { color: #ffc800; }
+  .metric-value.bad { color: #ff5050; }
+
+  /* === PROGRESS BARS === */
+  .progress-bar {
+    width: 100%; height: 8px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 6px 0;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00c8ff, #00ff64);
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+  .progress-fill.warn { background: linear-gradient(90deg, #ffc800, #ff8c00); }
+  .progress-fill.bad { background: linear-gradient(90deg, #ff8c00, #ff5050); }
+
+  /* === TRIGGERS === */
+  .trigger-item {
+    background: rgba(0, 30, 60, 0.5);
+    border-left: 3px solid #00c8ff;
+    padding: 8px 12px;
+    margin: 6px 0;
+    border-radius: 4px;
+    font-size: 0.85rem;
+  }
+  .trigger-time { color: #00c8ff; font-family: monospace; font-size: 0.8rem; }
+  .trigger-desc { color: #e0e8ff; margin-top: 2px; }
+
+  /* === RECENT === */
+  .recent-item {
+    background: rgba(0, 30, 60, 0.4);
+    padding: 8px 12px;
+    margin: 6px 0;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    border-left: 3px solid rgba(0, 200, 255, 0.4);
+  }
+  .recent-cmd { color: #00c8ff; font-style: italic; }
+  .recent-resp { color: #b0c4de; margin-top: 2px; font-size: 0.8rem; }
+
+  /* === GAME === */
+  .game-time {
+    font-size: 2rem; font-weight: bold; color: #00c8ff;
+    text-align: center; margin: 10px 0;
+  }
+  .game-limit { text-align: center; color: #b0c4de; font-size: 0.85rem; }
+
+  /* === ANIMATIONS === */
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+  .live-dot {
+    display: inline-block; width: 8px; height: 8px;
+    background: #00ff64; border-radius: 50%;
+    animation: pulse 1.5s infinite;
+    margin-right: 6px;
+  }
+
+  /* === SCROLLBAR === */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+  ::-webkit-scrollbar-thumb { background: rgba(0, 200, 255, 0.3); border-radius: 3px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>🤖 JARVISBOT DASHBOARD</h1>
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="close-btn" onclick="hideDashboard()">✕ Cerrar (Esc)</button>
+  </div>
+
+  <div class="grid">
+    <!-- SESIÓN -->
+    <div class="card">
+      <h2><span class="live-dot"></span>Usuario Activo</h2>
+      <div class="session-user" id="userName">Cargando...</div>
+      <div class="session-detail">Confianza: <strong id="userConfidence">--</strong></div>
+      <div class="session-detail">Sesión: <strong id="userElapsed">--</strong> min</div>
+      <div class="session-detail">Expira en: <strong id="userRemaining">--</strong> min</div>
+    </div>
+
+    <!-- SISTEMA -->
+    <div class="card">
+      <h2>💻 Sistema</h2>
+      <div class="metric">
+        <span class="metric-label">CPU</span>
+        <span class="metric-value" id="cpuValue">--%</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="cpuBar" style="width:0%"></div></div>
+
+      <div class="metric">
+        <span class="metric-label">RAM</span>
+        <span class="metric-value" id="ramValue">--</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="ramBar" style="width:0%"></div></div>
+
+      <div class="metric">
+        <span class="metric-label">Disco</span>
+        <span class="metric-value" id="diskValue">--</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" id="diskBar" style="width:0%"></div></div>
+    </div>
+
+    <!-- SALUD JARVIS -->
+    <div class="card">
+      <h2>🧠 Salud del Asistente</h2>
+      <div class="metric"><span class="metric-label">Uptime</span><span class="metric-value" id="uptime">-- min</span></div>
+      <div class="metric"><span class="metric-label">Peticiones</span><span class="metric-value" id="totalReq">--</span></div>
+      <div class="metric"><span class="metric-label">Fast Path</span><span class="metric-value good" id="fastHits">--</span></div>
+      <div class="metric"><span class="metric-label">LLM calls</span><span class="metric-value" id="llmCalls">--</span></div>
+      <div class="metric"><span class="metric-label">LLM avg</span><span class="metric-value" id="llmAvg">-- s</span></div>
+      <div class="metric"><span class="metric-label">Acciones</span><span class="metric-value" id="actions">--</span></div>
+      <div class="metric"><span class="metric-label">Fallos</span><span class="metric-value" id="failures">--</span></div>
+    </div>
+
+    <!-- TIEMPO DE JUEGO -->
+    <div class="card">
+      <h2>🎮 Tiempo de Juego</h2>
+      <div class="game-time" id="gameUsed">-- min</div>
+      <div class="game-limit" id="gameLimit">Límite: -- min</div>
+      <div class="progress-bar" style="margin-top:15px;">
+        <div class="progress-fill" id="gameBar" style="width:0%"></div>
+      </div>
+      <div class="metric" style="margin-top:8px;">
+        <span class="metric-label">Restante</span>
+        <span class="metric-value" id="gameRemaining">-- min</span>
+      </div>
+    </div>
+
+    <!-- TRIGGERS -->
+    <div class="card">
+      <h2>⏰ Triggers Programados</h2>
+      <div id="triggersList" style="max-height:250px; overflow-y:auto;">
+        <div style="color:#888; text-align:center; padding:20px;">Cargando...</div>
+      </div>
+    </div>
+
+    <!-- INTERACCIONES RECIENTES -->
+    <div class="card">
+      <h2>💬 Interacciones Recientes</h2>
+      <div id="recentList" style="max-height:250px; overflow-y:auto;">
+        <div style="color:#888; text-align:center; padding:20px;">Cargando...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // === CERRAR CON ESC ===
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hideDashboard();
+    });
+
+    function hideDashboard() {
+      // Avisar a Electron para ocultar la ventana
+      const { ipcRenderer } = require('electron');
+      ipcRenderer.send('dashboard-hide');
+    }
+
+    // === RELOJ ===
+    function updateClock() {
+      const now = new Date();
+      document.getElementById('clock').textContent = now.toLocaleTimeString('es-ES');
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // === FETCH DATA ===
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/dashboard');
+        const data = await res.json();
+        updateUI(data);
+      } catch (e) {
+        console.error('Error fetch:', e);
+      }
+    }
+
+    function updateUI(data) {
+      // Sesión
+      if (data.session && data.session.user_id) {
+        document.getElementById('userName').textContent = data.session.display_name;
+        document.getElementById('userName').classList.remove('no-auth');
+        document.getElementById('userConfidence').textContent = (data.session.confidence || 0).toFixed(3);
+        document.getElementById('userElapsed').textContent = data.session.elapsed_minutes || '--';
+        document.getElementById('userRemaining').textContent = data.session.remaining_minutes || '--';
+      } else {
+        document.getElementById('userName').textContent = 'No autenticado';
+        document.getElementById('userName').classList.add('no-auth');
+        document.getElementById('userConfidence').textContent = '--';
+        document.getElementById('userElapsed').textContent = '--';
+        document.getElementById('userRemaining').textContent = '--';
+      }
+
+      // Sistema
+      if (data.system && !data.system.error) {
+        const cpu = data.system.cpu_percent;
+        document.getElementById('cpuValue').textContent = cpu + '%';
+        document.getElementById('cpuBar').style.width = cpu + '%';
+        document.getElementById('cpuBar').className = 'progress-fill' + (cpu > 80 ? ' bad' : cpu > 60 ? ' warn' : '');
+
+        const ram = data.system.ram_percent;
+        document.getElementById('ramValue').textContent = `${ram}% (${data.system.ram_used_gb}/${data.system.ram_total_gb} GB)`;
+        document.getElementById('ramBar').style.width = ram + '%';
+        document.getElementById('ramBar').className = 'progress-fill' + (ram > 85 ? ' bad' : ram > 70 ? ' warn' : '');
+
+        const disk = data.system.disk_percent;
+        document.getElementById('diskValue').textContent = `${disk}% (${data.system.disk_used_gb}/${data.system.disk_total_gb} GB)`;
+        document.getElementById('diskBar').style.width = disk + '%';
+      }
+
+      // Salud
+      if (data.health && !data.health.error) {
+        document.getElementById('uptime').textContent = data.health.uptime_minutes + ' min';
+        document.getElementById('totalReq').textContent = data.health.total_requests;
+        document.getElementById('fastHits').textContent = data.health.fast_path_hits;
+        document.getElementById('llmCalls').textContent = data.health.llm_calls;
+        document.getElementById('llmAvg').textContent = data.health.avg_llm_time + ' s';
+        document.getElementById('actions').textContent = data.health.actions_executed;
+        document.getElementById('failures').textContent = data.health.actions_failed;
+      }
+
+      // Game
+      if (data.game && !data.game.error && data.game.limit_minutes !== null) {
+        document.getElementById('gameUsed').textContent = data.game.used_today_minutes + ' min';
+        document.getElementById('gameLimit').textContent = 'Límite: ' + data.game.limit_minutes + ' min';
+        const pct = (data.game.used_today_minutes / data.game.limit_minutes) * 100;
+        document.getElementById('gameBar').style.width = Math.min(pct, 100) + '%';
+        document.getElementById('gameBar').className = 'progress-fill' + (pct > 90 ? ' bad' : pct > 70 ? ' warn' : '');
+        document.getElementById('gameRemaining').textContent = data.game.remaining_minutes + ' min';
+      } else {
+        document.getElementById('gameUsed').textContent = 'Sin límite';
+        document.getElementById('gameLimit').textContent = 'Usuario sin restricciones';
+        document.getElementById('gameRemaining').textContent = '∞';
+      }
+
+      // Triggers
+      if (data.triggers && data.triggers.length > 0) {
+        document.getElementById('triggersList').innerHTML = data.triggers.map(t => `
+          <div class="trigger-item">
+            <div class="trigger-time">${(t.condition && t.condition.hour !== undefined) ? t.condition.hour + ':' + (t.condition.minute || '00') : '--:--'}</div>
+            <div class="trigger-desc">${t.intent || 'Sin descripción'}</div>
+          </div>
+        `).join('');
+      } else {
+        document.getElementById('triggersList').innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Sin triggers</div>';
+      }
+
+      // Recent
+      if (data.recent && data.recent.length > 0) {
+        document.getElementById('recentList').innerHTML = data.recent.map(r => `
+          <div class="recent-item">
+            <div class="recent-cmd">» ${r.command || r.input || '?'}</div>
+            <div class="recent-resp">${(r.response || '').substring(0, 80)}</div>
+          </div>
+        `).join('');
+      } else {
+        document.getElementById('recentList').innerHTML = '<div style="color:#888; text-align:center; padding:20px;">Sin interacciones</div>';
+      }
+    }
+
+    // === AUTO-REFRESH cada 3 segundos ===
+    fetchData();
+    setInterval(fetchData, 3000);
+  </script>
+</body>
+</html>
