@@ -4,8 +4,11 @@ from playwright.sync_api import sync_playwright, TimeoutError
 
 # Cargar variables de entorno
 load_dotenv(override=True)
-USER = os.getenv("USER")
-PASS = os.getenv("PASS")
+# Credenciales: JARVIS_BB_USER/JARVIS_BB_PASS primero (getenv("USER") en Linux
+# devuelve el usuario del sistema, p.ej. "marc", no tu correo institucional).
+_USER_LEGACY = os.getenv("USER") or ""
+USER = os.getenv("JARVIS_BB_USER") or (_USER_LEGACY if "@" in _USER_LEGACY else None)
+PASS = os.getenv("JARVIS_BB_PASS") or os.getenv("PASS")
 
 STORAGE_STATE = "blackboard_state.json"  # Ahora guardará las cookies de ambos dominios
 
@@ -15,7 +18,7 @@ def main():
     print("Se abrirá Chromium headless. Ten tu teléfono a mano para el código SMS.\n")
 
     if not USER or not PASS:
-        print("ERROR: Faltan USER/PASS en el archivo .env")
+        print("ERROR: Faltan JARVIS_BB_USER / JARVIS_BB_PASS en el archivo .env")
         return
 
     with sync_playwright() as p:

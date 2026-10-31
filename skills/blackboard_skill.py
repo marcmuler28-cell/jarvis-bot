@@ -18,8 +18,13 @@ DOTENV_PATH = os.path.join(BASE_DIR, "..", ".env")
 if os.path.exists(DOTENV_PATH):
     load_dotenv(DOTENV_PATH, override=True)
 
-USER = os.getenv("USER")
-PASS = os.getenv("PASS")
+# Credenciales institucionales. OJO: getenv("USER") en Linux devuelve el
+# usuario del sistema (p.ej. "marc"), no tu correo — por eso van primero
+# las variables propias del proyecto; USER/PASS quedan por compatibilidad
+# antigua, pero solo se acepta un USER legacy que parezca un correo.
+_USER_LEGACY = os.getenv("USER") or ""
+USER = os.getenv("JARVIS_BB_USER") or (_USER_LEGACY if "@" in _USER_LEGACY else None)
+PASS = os.getenv("JARVIS_BB_PASS") or os.getenv("PASS")
 
 BLACKBOARD_LOGIN = "https://cibertec.blackboard.com/webapps/login/"
 BLACKBOARD_COURSES = "https://cibertec.blackboard.com/ultra/course"
@@ -123,7 +128,9 @@ class BlackboardSkill:
     def login(self, force_manual=False):
         logger.info("Iniciando sesión en Blackboard/MiCibertec...")
         if not USER or not PASS:
-            raise RuntimeError("Faltan USER/PASS en el archivo .env o las variables de entorno.")
+            raise RuntimeError(
+                "Faltan JARVIS_BB_USER / JARVIS_BB_PASS en el archivo .env "
+                "(tu correo y contraseña institucional).")
         self._launch_browser()
         if not force_manual and os.path.exists(self.storage_state_path):
             self.context = self.browser.new_context(storage_state=self.storage_state_path)

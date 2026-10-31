@@ -11,8 +11,11 @@ if os.path.exists(dotenv_path):
 else:
     load_dotenv(override=True)
 
-USER = os.getenv("USER")
-PASS = os.getenv("PASS")
+# Credenciales: JARVIS_BB_USER/JARVIS_BB_PASS primero (getenv("USER") en
+# Linux devuelve el usuario del sistema, p.ej. "marc", no tu correo).
+_USER_LEGACY = os.getenv("USER") or ""
+USER = os.getenv("JARVIS_BB_USER") or (_USER_LEGACY if "@" in _USER_LEGACY else None)
+PASS = os.getenv("JARVIS_BB_PASS") or os.getenv("PASS")
 OPERA_PATH = os.getenv("OPERA_PATH")
 
 EMAIL_INPUT = "#i0116"
