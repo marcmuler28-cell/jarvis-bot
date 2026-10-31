@@ -28,3 +28,5 @@ node_modules/
 *.backup*
 .aider*
 .jarvis/
+blackboard_state.json
+sms_code.txt
