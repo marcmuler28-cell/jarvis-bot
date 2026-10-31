@@ -40,6 +40,15 @@ let ultimoQR = null;
 let qrDataUrl = null;
 let listo = false;
 let iniciando = true;
+let authYaAvisado = false;
+
+/** true si el mensaje es un «estado» de WhatsApp o un broadcast, no un chat */
+function esEstado(msg) {
+  if (!msg) return true;
+  if (msg.isStatus) return true;
+  const de = String(msg.from || '');
+  return de === 'status@broadcast' || de.endsWith('@broadcast');
+}
 
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: path.join(__dirname, '.wwebjs_auth') }),
@@ -58,7 +67,13 @@ client.on('qr', async (qr) => {
   log('QR NUEVO → escanéalo con WhatsApp → Dispositivos vinculados → Vincular un dispositivo');
 });
 client.on('loading_screen', (pct) => log(`Cargando WhatsApp Web… ${pct}%`));
-client.on('authenticated', () => log('Sesión autenticada (LocalAuth).'));
+client.on('authenticated', () => {
+  // whatsapp-web.js puede emitir este evento varias veces durante el arranque:
+  // avisamos solo una vez hasta que se desconecte.
+  if (authYaAvisado) return;
+  authYaAvisado = true;
+  log('Sesión autenticada (LocalAuth).');
+});
 client.on('auth_failure', (m) => log('FALLO de autenticación:', m));
 client.on('ready', () => {
   listo = true; iniciando = false; ultimoQR = null; qrDataUrl = null;
@@ -67,11 +82,14 @@ client.on('ready', () => {
 });
 client.on('change_state', (s) => log('Estado:', s));
 client.on('disconnected', (razon) => {
-  listo = false; iniciando = false;
+  listo = false; iniciando = false; authYaAvisado = false;
   log('Desconectado:', razon, '— reinicia el puente para reconectar.');
 });
 client.on('message', (msg) => {
-  if (msg && !msg.fromMe && msg.body) {
+  // Los estados de los contactos (status@broadcast) llegan como mensajes:
+  // los ignoramos para no inundar la terminal ni responderlos por error.
+  if (esEstado(msg)) return;
+  if (!msg.fromMe && msg.body) {
     log('💬 mensaje entrante de', msg.from, '→', String(msg.body).slice(0, 80));
   }
 });
