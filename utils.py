@@ -24,7 +24,10 @@ import shutil
 import pyperclip
 
 import numpy as np
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except Exception:
+    pass
 
 try:
     import pyautogui
@@ -40,8 +43,15 @@ try:
     import pygame
 except Exception:
     pygame = None
-from faster_whisper import WhisperModel
-from llama_cpp import Llama
+try:
+    from faster_whisper import WhisperModel
+except Exception:
+    pass
+# [PATCH_CHAT_MODE]
+try:
+    from llama_cpp import Llama
+except Exception:
+    Llama = None
 
 try:
     if platform.system() == "Windows":
@@ -53,7 +63,10 @@ except Exception:
     pynput_mouse = None
     pynput_keyboard = None
 
-from openwakeword.model import Model
+try:
+    from openwakeword.model import Model
+except Exception:
+    pass
 from build_app_cache import find_app as _find_app_cached  # <-- nueva importación
 
 if pyautogui is not None:
@@ -112,6 +125,7 @@ class SystemTools:
         self.actions = {
             "open_app": self.open_app,
             "close_app": self.close_app,
+            "move_window": self.move_window_to_workspace,
             "move_mouse": self.move_mouse,
             "click": self.click,
             "double_click": self.double_click,
@@ -236,6 +250,212 @@ class SystemTools:
             "(prueba: pacman -S gnome-calculator o kde-applications-meta para kcalc)."
         )
 
+    # [PATCH_WS_VERIFY]
+    # App -> workspace destino (REGLAS DE ALEX: editar aqui)
+    WORKSPACES = {
+        "spotify": 3,
+        "discord": 4,
+        # "firefox": 1,
+    }
+
+    # Categorias de .desktop -> workspace. Replica el mapa de
+    # ~/.config/quickshell/scripts/launch_app.sh para que Jarvis abra cada app
+    # en el mismo workspace que el lanzador del escritorio.
+    CATEGORY_WORKSPACES = {
+        "desarrollo": 1, "sistema": 1, "oficina": 1, "utilidades": 1,
+        "multimedia": 3, "graficos": 3,
+        "internet": 4,
+        "juegos": 5,
+    }
+
+    # Palabras de Categories= (freedesktop) -> bucket de CATEGORY_WORKSPACES
+    _CATEGORY_HINTS = (
+        ("utilidades", ("utility", "calculator")),
+        ("juegos", ("game",)),
+        ("internet", ("network", "webbrowser", "email", "chat",
+                      "instantmessaging", "p2p", "remoteaccess")),
+        ("multimedia", ("audio", "video", "player", "tv", "recorder")),
+        ("graficos", ("graphics", "photography", "scanning", "3dgraphics")),
+        ("desarrollo", ("development", "ide", "texteditor", "debugger",
+                        "revisioncontrol")),
+        ("oficina", ("office", "wordprocessor", "spreadsheet", "presentation",
+                     "calendar", "finance")),
+        ("sistema", ("system", "settings", "monitor", "filesystem",
+                     "terminalemulator", "security")),
+    )
+
+    LOCKS_SINGLETON = {
+        "discord": [
+            "~/.config/discord/SingletonLock",
+            "~/.config/discord/SingletonSocket",
+            "~/.config/discord/SingletonCookie",
+            "~/.var/app/com.discordapp.Discord/config/discord/Singleton*",
+        ],
+        "spotify": [
+            "~/.config/spotify/SingletonLock",
+            "~/.config/spotify/SingletonSocket",
+            "~/.config/spotify/SingletonCookie",
+        ],
+    }
+
+    def _esperar_y_mover(self, hints, workspace, timeout=10):
+        """Poll por clase sobre hyprctl -j clients; mueve la ventana al
+        workspace con movetoworkspacesilent por address (sin windowrules)."""
+        if not workspace:
+            return ""
+        import json as _json, time as _time
+        hints = [str(h).lower() for h in hints if h]
+        fin = _time.time() + timeout
+        while _time.time() < fin:
+            try:
+                r = subprocess.run(['hyprctl', '-j', 'clients'],
+                                   capture_output=True, text=True, timeout=3)
+                for c in _json.loads(r.stdout or "[]"):
+                    if not c.get('mapped', False):
+                        continue
+                    clase = (c.get('class') or '').lower()
+                    inicial = (c.get('initialClass') or '').lower()
+                    if any(h in clase or h in inicial for h in hints):
+                        addr = c.get('address', '')
+                        if addr:
+                            subprocess.run(
+                                ['hyprctl', 'dispatch', 'movetoworkspacesilent',
+                                 f'{workspace},address:{addr}'],
+                                capture_output=True, text=True, timeout=3)
+                            return f" | Ventana verificada en ws{workspace}"
+            except Exception:
+                pass
+            _time.sleep(0.4)
+        return ""
+
+    def _workspace_for_desktop(self, desktop_path):
+        """Deduce el workspace destino leyendo Categories= del .desktop."""
+        try:
+            import configparser
+            cfg = configparser.ConfigParser(interpolation=None)
+            cfg.read(desktop_path)
+            cats = cfg['Desktop Entry'].get('Categories', '').lower()
+        except Exception:
+            return None
+        if not cats:
+            return None
+        for bucket, pistas in self._CATEGORY_HINTS:
+            if any(p in cats for p in pistas):
+                return self.CATEGORY_WORKSPACES.get(bucket)
+        return None
+
+    def _hyprctl_json(self, *args):
+        """Ejecuta `hyprctl -j <args>` y devuelve el JSON ya parseado."""
+        import json as _json
+        try:
+            r = subprocess.run(['hyprctl', '-j', *args],
+                               capture_output=True, text=True, timeout=3)
+            return _json.loads(r.stdout or 'null')
+        except Exception as e:
+            print(f"[HYPR] hyprctl {' '.join(args)} fallo: {e}")
+            return None
+
+    def _app_name_hints(self, app_name):
+        """Nombres alternativos de una app (desktop/ejecutable) segun el catalogo."""
+        pistas = []
+        try:
+            ruta = self._find_desktop_entry(app_name)
+        except Exception:
+            ruta = None
+        if ruta:
+            pistas.append(ruta.stem.lower())
+            try:
+                import configparser
+                cfg = configparser.ConfigParser(interpolation=None)
+                cfg.read(ruta)
+                ex = (cfg['Desktop Entry'].get('Exec', '') or '').split()
+                if ex:
+                    pistas.append(os.path.basename(ex[0]).lower())
+            except Exception:
+                pass
+        return [p for p in pistas if p]
+
+    def _resolve_client(self, app_name):
+        """Busca el cliente de Hyprland que corresponde al nombre pedido."""
+        needle = re.sub(r"[^\w\s\+\.\-]", " ", (app_name or "").lower())
+        needle = re.sub(r"\s+", " ", needle).strip()
+        if not needle:
+            return None
+        if needle in ("activa", "actual", "esta", "esta ventana", "ventana activa"):
+            return self._hyprctl_json('activewindow') or None
+        clientes = [c for c in (self._hyprctl_json('clients') or []) if c.get('mapped')]
+
+        def buscar(patron):
+            exacto = parcial = titulo = None
+            for c in clientes:
+                clase = (c.get('class') or '').lower()
+                inicial = (c.get('initialClass') or '').lower()
+                tit = (c.get('title') or '').lower()
+                c_pc = clase.replace(" ", "").replace("-", "")
+                i_pc = inicial.replace(" ", "").replace("-", "")
+                p_pc = patron.replace(" ", "").replace("-", "")
+                t_pc = tit.replace(" ", "").replace("-", "")
+                if patron in (clase, inicial) or p_pc in (c_pc, i_pc):
+                    exacto = exacto or c
+                elif (patron in clase or clase in patron or patron in inicial or inicial in patron
+                      or (p_pc and (p_pc in c_pc or c_pc in p_pc))
+                      or (p_pc and (p_pc in i_pc or i_pc in p_pc))):
+                    parcial = parcial or c
+                elif patron in tit or (p_pc and p_pc in t_pc):
+                    titulo = titulo or c
+            return exacto or parcial or titulo
+
+        encontrado = buscar(needle)
+        if encontrado:
+            return encontrado
+        # El nombre puede ser un alias ("calculadora" -> org.kde.kcalc)
+        for pista in self._app_name_hints(app_name):
+            if pista != needle:
+                encontrado = buscar(pista)
+                if encontrado:
+                    return encontrado
+        return None
+
+    def move_window_to_workspace(self, app_name, workspace, follow=False):
+        """Mueve una ventana ya abierta al workspace indicado (Hyprland)."""
+        nombre = (app_name or "").strip().strip("'\"")
+        ws = str(workspace or "").strip().lower()
+        if not nombre:
+            return "No me dijiste que ventana mover."
+        if not ws:
+            return "No me dijiste a que workspace moverla."
+        ws = {"siguiente": "e+1", "next": "e+1",
+              "anterior": "e-1", "prev": "e-1"}.get(ws, ws)
+        cliente = self._resolve_client(nombre)
+        if not cliente or not cliente.get('address'):
+            abiertas = sorted({w['class'] for w in self._list_open_windows() if w['class']})
+            lista = ", ".join(abiertas) if abiertas else "ninguna"
+            return f"No encontre una ventana de '{nombre}'. Ventanas abiertas: {lista}."
+        addr = cliente['address']
+        dispatch = 'movetoworkspace' if follow else 'movetoworkspacesilent'
+        r = subprocess.run(['hyprctl', 'dispatch', dispatch, f"{ws},address:{addr}"],
+                           capture_output=True, text=True, timeout=3)
+        salida = (r.stdout or '').strip()
+        if 'ok' not in salida.lower():
+            return f"Hyprland rechazo mover '{nombre}' al workspace {ws}: {salida or r.stderr.strip()}"
+        titulo = cliente.get('title') or cliente.get('class') or nombre
+        return f"'{titulo}' movida al workspace {ws}."
+
+    def _limpiar_singleton_locks(self, killed):
+        """Elimina locks huerfanos que bloquean la siguiente instancia."""
+        import glob as _g
+        removidos = 0
+        for patron in killed:
+            for plantilla in self.LOCKS_SINGLETON.get(patron, []):
+                for ruta in _g.glob(os.path.expanduser(plantilla)):
+                    try:
+                        os.remove(ruta)
+                        removidos += 1
+                    except OSError:
+                        pass
+        if removidos:
+            print(f"[CLOSE] SingletonLock eliminados: {removidos}")
+
     def open_app(self, app_name):
         """Intenta abrir una aplicación por nombre, resolviendo alias."""
         # Limpia el nombre (quita comillas, artículos y ruido de transcripción)
@@ -326,8 +546,13 @@ class SystemTools:
             app = _find_app_cached(cleaned_name)
             if app:
                 desktop_path = None
-                # Buscar el archivo .desktop real
-                for d in ["/usr/share/applications", _os.path.expanduser("~/.local/share/applications")]:
+                # 1a) ruta exacta guardada por build_app_cache (cubre flatpak/snap)
+                ruta_cache = app.get('desktop_path')
+                if ruta_cache and _os.path.exists(ruta_cache):
+                    desktop_path = Path(ruta_cache)
+                # 1b) buscar el .desktop por nombre en los directorios clasicos
+                for d in ([] if desktop_path else
+                          ["/usr/share/applications", _os.path.expanduser("~/.local/share/applications")]):
                     p = _os.path.join(d, app['desktop_file'])
                     if _os.path.exists(p):
                         desktop_path = Path(p)
@@ -342,6 +567,9 @@ class SystemTools:
         desktop_dirs = [
             "/usr/share/applications",
             _os.path.expanduser("~/.local/share/applications"),
+            "/var/lib/flatpak/exports/share/applications",
+            _os.path.expanduser("~/.local/share/flatpak/exports/share/applications"),
+            "/var/lib/snapd/desktop/applications",
         ]
         for d in desktop_dirs:
             for ext in (cleaned_name, cleaned_name.lower(), cleaned_name.replace(" ", "-")):
@@ -374,7 +602,15 @@ class SystemTools:
                             parts = [p for p in parts if p and not p.endswith('=')]
                             if parts:
                                 self._spawn_linux_detach(parts)
-                                return f"Aplicación '{desktop_path.stem}' iniciada (Exec directo)."
+                                hints = [desktop_path.stem, os.path.basename(parts[0]),
+                                         config['Desktop Entry'].get('StartupWMClass', '')]
+                                ws = (self.WORKSPACES.get(desktop_path.stem.lower())
+                                      or self._workspace_for_desktop(desktop_path))
+                                # Java/.jar tardan mucho en mapear su ventana
+                                lento = ('java' in exec_cmd.lower() or '.jar' in exec_cmd.lower())
+                                verif = self._esperar_y_mover(hints, ws,
+                                                              timeout=30 if lento else 12)
+                                return f"Aplicación '{desktop_path.stem}' iniciada (Exec directo)" + verif
                 except Exception as parse_err:
                     print(f"[DESKTOP] Error parseando .desktop: {parse_err}")
 
@@ -389,25 +625,20 @@ class SystemTools:
 
     def _list_open_windows(self):
         windows = []
-        if shutil.which('wmctrl'):
-            try:
-                result = subprocess.run(['wmctrl', '-lp'], capture_output=True, text=True)
-                for line in result.stdout.splitlines():
-                    parts = line.split(None, 4)
-                    if len(parts) >= 5:
-                        win_id, desktop, pid, host, title = parts
-                        windows.append({'id': win_id, 'pid': pid, 'title': title})
-                return windows
-            except Exception:
-                pass
-        if shutil.which('xdotool'):
-            try:
-                result = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '.'], capture_output=True, text=True)
-                for win_id in result.stdout.splitlines():
-                    windows.append({'id': win_id, 'title': ''})
-                return windows
-            except Exception:
-                pass
+        try:
+            import json as _json
+            result = subprocess.run(['hyprctl', '-j', 'clients'],
+                                    capture_output=True, text=True, timeout=3)
+            clients = _json.loads(result.stdout or "[]")
+            for c in clients:
+                if c.get('mapped', False) and not c.get('hidden', False):
+                    windows.append({'id': c.get('address', ''),
+                                    'pid': str(c.get('pid', '')),
+                                    'title': c.get('title', ''),
+                                    'class': (c.get('class') or '').lower(),
+                                    'initialClass': (c.get('initialClass') or '').lower()})
+        except Exception:
+            pass
         return windows
 
     def close_app(self, app_name):
@@ -424,11 +655,17 @@ class SystemTools:
 
         app_map = {
             "spotify": ["spotify"],
+            # [PATCH_CLOSE_V2]
+            "discord": ["discord", "com.discordapp.Discord", "webcord", "vesktop", "armcord"],
+            "webcord": ["webcord"],
+            "vencord": ["discord", "vesktop"],
             "calculadora": ["gnome-calculator", "kcalc", "qalculate-gtk", "galculator", "mate-calc", "deepin-calculator", "lxqt-calc", "xcalc"],
             "calc": ["gnome-calculator", "kcalc", "qalculate-gtk", "galculator", "mate-calc", "deepin-calculator", "lxqt-calc", "xcalc"],
             "terminal": ["konsole", "gnome-terminal", "xterm", "alacritty", "kitty", "terminator", "urxvt"],
             "explorador": ["nautilus", "dolphin", "thunar", "nemo", "pcmanfm"],
             "firefox": ["firefox"],
+            "navegador": ["firefox"],
+            "browser": ["firefox"],
             "chrome": ["google-chrome", "chromium", "brave-browser", "chromium-browser"],
             "brave": ["brave-browser", "brave"],
         }
@@ -445,16 +682,23 @@ class SystemTools:
                 continue
 
         if killed:
-            return f"Intenté cerrar: {', '.join(killed)}."
+            self._limpiar_singleton_locks(killed)
+            return f"Cerré {cleaned} (procesos finalizados: {', '.join(killed)})."  # [PATCH_CLOSE_V2]
 
         windows = self._list_open_windows()
         closed = []
         for win in windows:
-            title = win.get('title', '').lower()
-            if cleaned in title or any(token in title for token in cleaned.split()):
-                if shutil.which('xdotool'):
+            # [PATCH_CLOSE_V2] match por titulo Y por clase
+            title = (win.get('title') or '').lower()
+            clase = (win.get('class') or '') + (win.get('initialClass') or '')
+            if cleaned in title or cleaned in clase or any(token in title for token in cleaned.split()):
+                if shutil.which('hyprctl'):
                     try:
-                        subprocess.run(['xdotool', 'windowclose', win['id']], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        subprocess.run(['hyprctl', 'dispatch', 'closewindow',
+                             f"address:{win['id']}"],
+                             stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
                         closed.append(win['id'])
                     except Exception:
                         pass

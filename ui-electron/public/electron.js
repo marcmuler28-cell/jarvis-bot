@@ -1,18 +1,24 @@
 /**
- * electron.js v8 - Versión estable y limpia
+ * electron.js v8.4 – Arrastre con movementX/Y + kdotool exclusivo (sin setBounds)
  *
- * REGLAS DE ORO IMPLEMENTADAS:
- * 1. Carga Local (Opción A): El botón carga walkie_button.html con loadFile()
- * 2. focusable: false: El botón no roba foco del teclado
- * 3. Arrastre manual: Como focusable:false bloquea el arrastre nativo en KWin,
- *    implementamos el arrastre manual capturando mousedown/mousemove y
- *    moviendo la ventana con buttonWindow.setPosition()
+ * REGLAS DE ORO:
+ * 1. Carga Local: walkie_button.html con loadFile()
+ * 2. focusable: false → no roba foco
+ * 3. Arrastre: el renderer envía movementX/Y (deltas raw del mouse).
+ *    El main process los acumula en una posición virtual y mueve la
+ *    ventana SOLO con kdotool (sin setBounds, para evitar vibración).
  */
 
 const { app, BrowserWindow, screen, Tray, Menu, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+
+// FIX Wayland: forzar Electron a usar Wayland nativo (no XWayland).
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto');
+  app.commandLine.appendSwitch('enable-features', 'WaylandWindowDecorations');
+}
 const http = require('http');
 let notifier;
 try { notifier = require('node-notifier'); } catch(e) { console.log('[JARVIS] node-notifier no disponible'); }
@@ -107,15 +113,10 @@ async function waitForBackend() {
 }
 
 // ============================================================
-// VENTANA 1: WALLPAPER
-// ============================================================
-
-// ============================================================
 // NOTIFICACIONES NATIVAS DE KDE (vía node-notifier / notify-send)
 // ============================================================
 function showNativeNotification(title, message, iconPath) {
   if (!notifier) {
-    // Fallback: notify-send directo
     const { exec } = require('child_process');
     const icon = iconPath || '';
     exec(`notify-send "${title}" "${message}" --icon="${icon}" --app-name="JarvisBot"`, (err) => {
@@ -145,47 +146,39 @@ function createDashboardWindow() {
     transparent: false,
     backgroundColor: '#000000',
     hasShadow: false,
-    // type: 'toolbar',  (removido)            // Cambiado: toolbar evita que KWin la trate como app fullscreen
     alwaysOnTop: false,
     fullscreenable: false,
     fullscreen: false,
     skipTaskbar: true,
     skipPager: true,
     resizable: false,
-    focusable: false,           // Confirmado: no roba foco
+    focusable: false,
+    show: false,
     title: 'JarvisBot Wallpaper',
     webPreferences: { nodeIntegration: true, contextIsolation: false },
     icon: path.join(__dirname, 'icon.png'),
   });
 
-  console.log('[JARVIS] Ventana wallpaper creada (type=toolbar, tamaño: ' + width + 'x' + height + ')');
+  console.log('[JARVIS] Ventana wallpaper creada (OCULTA por defecto, tamaño: ' + width + 'x' + height + ')');
+
   wallpaperWindow.setIgnoreMouseEvents(true, { forward: true });
   wallpaperWindow.setAlwaysOnTop(false);
-  // Quitar foco inmediatamente para que KWin no la priorice
   wallpaperWindow.blur();
-  // Hacer visible en todos los escritorios virtuales
   wallpaperWindow.setVisibleOnAllWorkspaces(true);
 
-  // Forzar layer "below" en KWin usando wmctrl (KWin ignora type:desktop a veces)
+  // Forzar layer "below" en KWin usando wmctrl
   const { exec } = require('child_process');
   const forceBelow = () => {
     if (!wallpaperWindow || wallpaperWindow.isDestroyed()) return;
-    // Obtener el ID nativo de la ventana (X11 window ID)
     const handle = wallpaperWindow.getNativeWindowHandle();
-    // El handle es un Buffer, convertir a número hex
     const winId = '0x' + handle.toString('hex');
-    console.log('[JARVIS] Wallpaper native window ID:', winId);
-
-    // Usar xdotool con el ID exacto (no depende del título)
-    const XDOTOOL = '/usr/bin/xdotool';
     const WMCTRL = '/usr/bin/wmctrl';
     const cmd = `"${WMCTRL}" -i -r "${winId}" -b add,below,skip_taskbar,skip_pager`;
     exec(cmd, (err) => {
       if (err) {
         console.log('[JARVIS] wmctrl -i falló, intentando xdotool...');
-        // Fallback: xdotool con window ID
-        exec(`"${XDOTOOL}" set_window --below ${winId}`, (err2) => {
-          if (err2) console.log('[JARVIS] xdotool tampoco disponible, usando type:desktop nativo');
+        exec(`/usr/bin/xdotool set_window --below ${winId}`, (err2) => {
+          if (err2) console.log('[JARVIS] xdotool tampoco disponible');
           else console.log('[JARVIS] ✅ Wallpaper forzado below via xdotool');
         });
       } else {
@@ -193,12 +186,10 @@ function createDashboardWindow() {
       }
     });
   };
-  // Aplicar después de que la ventana sea visible (reintentar por si tarda)
   setTimeout(forceBelow, 500);
   setTimeout(forceBelow, 2000);
   setTimeout(forceBelow, 5000);
 
-  // Cargar dashboard.html SOLO cuando el backend esté 100% listo
   waitForBackend().then((ready) => {
     if (ready && wallpaperWindow && !wallpaperWindow.isDestroyed()) {
       console.log('[JARVIS] Backend listo. Cargando Dashboard...');
@@ -210,7 +201,6 @@ function createDashboardWindow() {
     }
   });
 
-  // IPC: mostrar/ocultar dashboard desde el botón
   ipcMain.on('dashboard-toggle', () => {
     if (!wallpaperWindow || wallpaperWindow.isDestroyed()) return;
     if (wallpaperWindow.isVisible()) {
@@ -223,30 +213,8 @@ function createDashboardWindow() {
     }
   });
 
-
-  // IPC: recibir solicitud de notificación desde el renderer
   ipcMain.on('show-notification', (event, title, message) => {
     showNativeNotification(title, message);
-  });
-
-
-  // IPC: redimensionar la ventana del botón (para PIN panel)
-  ipcMain.on('resize-button-window', (event, width, height) => {
-    if (!buttonWindow || buttonWindow.isDestroyed()) return;
-    const [currentX, currentY] = buttonWindow.getPosition();
-    const [currentW, currentH] = buttonWindow.getSize();
-
-    // Calcular offset para mantener el CENTRO del botón en el mismo lugar
-    const offsetX = (width - currentW) / 2;
-    const offsetY = (height - currentH) / 2;
-
-    buttonWindow.setBounds({
-      x: Math.round(currentX - offsetX),
-                           y: Math.round(currentY - offsetY),
-                           width: width,
-                           height: height
-    });
-    console.log('[JARVIS] Botón redimensionado a:', width, 'x', height);
   });
 
   ipcMain.on('dashboard-hide', () => {
@@ -297,7 +265,7 @@ function createButtonWindow() {
     fullscreenable: false,
     skipTaskbar: true,
     resizable: false,
-    focusable: false,
+    focusable: true,   // FIX Wayland: KWin necesita focusable:true para mover la ventana.
     title: 'JarvisBot Button',
     webPreferences: {
       nodeIntegration: true,
@@ -318,6 +286,7 @@ function createButtonWindow() {
       waitForBackend().then((ready) => {
         if (ready && buttonWindow && !buttonWindow.isDestroyed()) {
           buttonWindow.show();
+          buttonWindow.webContents.openDevTools({ mode: "detach" });
           console.log('[JARVIS] Botón visible (backend listo)');
         }
       });
@@ -336,46 +305,33 @@ function createButtonWindow() {
     }
   }, 2000);
 
-  // REGLA #3: Arrastre nativo con screen.getCursorScreenPoint()
-  // En Linux/Wayland con focusable:false, las coords del evento mouse del renderer
-  // pueden ser poco fiables. Usamos la API nativa de Electron en el main process.
-  let dragOffsetX = 0;
-  let dragOffsetY = 0;
-  let isDragging = false;
-  let dragInterval = null;
+  // REGLA #3: Arrastre nativo vía CSS app-region: drag
+  // El arrastre lo maneja KWin nativamente (xdg_toplevel.move).
+  // CSS app-region: drag en walkie_button.html le dice al compositor que
+  // esa región permite arrastrar. No se necesita JavaScript para mover.
 
-  ipcMain.on('button-drag-start', (event, offsetX, offsetY) => {
-    if (!buttonWindow) return;
-    // Capturar offset: diferencia entre cursor y esquina de la ventana
-    const cursor = screen.getCursorScreenPoint();
-    const [winX, winY] = buttonWindow.getPosition();
-    dragOffsetX = cursor.x - winX;
-    dragOffsetY = cursor.y - winY;
-    isDragging = true;
-    console.log('[JARVIS] Drag start - cursor:', cursor.x, cursor.y, '| offset:', dragOffsetX, dragOffsetY);
-
-    // Loop nativo (cada 16ms = 60fps) para mover la ventana siguiendo el cursor
-    if (dragInterval) clearInterval(dragInterval);
-    dragInterval = setInterval(() => {
-      if (!isDragging || !buttonWindow || buttonWindow.isDestroyed()) {
-        if (dragInterval) { clearInterval(dragInterval); dragInterval = null; }
-        return;
-      }
-      const c = screen.getCursorScreenPoint();
-      const newX = c.x - dragOffsetX;
-      const newY = c.y - dragOffsetY;
-      const [w, h] = buttonWindow.getSize();
-      buttonWindow.setBounds({ x: newX, y: newY, width: w, height: h });
-    }, 16);
+  // Guardar posición cuando KWin mueva la ventana
+  buttonWindow.on('move', () => {
+    try {
+      const [px, py] = buttonWindow.getPosition();
+      if (px > 0 || py > 0) saveButtonPos(px, py);
+    } catch (e) {}
   });
 
-  ipcMain.on('button-drag-end', () => {
-    isDragging = false;
-    if (dragInterval) { clearInterval(dragInterval); dragInterval = null; }
-    if (!buttonWindow) return;
-    const [px, py] = buttonWindow.getPosition();
-    saveButtonPos(px, py);
-    console.log('[JARVIS] Botón movido a:', px, py);
+  // IPC: redimensionar la ventana del botón (para PIN panel)
+  ipcMain.on('resize-button-window', (event, width, height) => {
+    if (!buttonWindow || buttonWindow.isDestroyed()) return;
+    const [currentX, currentY] = buttonWindow.getPosition();
+    const [currentW, currentH] = buttonWindow.getSize();
+    const offsetX = (width - currentW) / 2;
+    const offsetY = (height - currentH) / 2;
+    buttonWindow.setBounds({
+      x: Math.round(currentX - offsetX),
+                           y: Math.round(currentY - offsetY),
+                           width: width,
+                           height: height
+    });
+    console.log('[JARVIS] Botón redimensionado a:', width, 'x', height);
   });
 }
 
@@ -405,7 +361,11 @@ function createTray() {
       try { fs.unlinkSync(BUTTON_POS_FILE); } catch (e) {}
       const primaryDisplay = screen.getPrimaryDisplay();
       const { width, height } = primaryDisplay.workArea;
-      if (buttonWindow) buttonWindow.setPosition(width - BUTTON_SIZE - 20, height - BUTTON_SIZE - 20);
+      if (buttonWindow) {
+        const newX = width - BUTTON_SIZE - 20;
+        const newY = height - BUTTON_SIZE - 20;
+        moveButtonTo(newX, newY);
+      }
       console.log('[JARVIS] Posición del botón reseteada');
     }},
     { type: 'separator' },
@@ -416,6 +376,7 @@ function createTray() {
     if (buttonWindow) {
       if (buttonWindow.isVisible()) buttonWindow.hide();
       else buttonWindow.show();
+      buttonWindow.webContents.openDevTools({ mode: "detach" });
     }
   });
 }

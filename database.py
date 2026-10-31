@@ -1,17 +1,26 @@
-import os
 import mysql.connector
 import re
 import json
+import os
 from datetime import datetime
 from logger_config import logger
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 class MemoryManager:
     def __init__(self):
+        # Credenciales por entorno (.env) — nunca hardcodeadas en el repo.
+        # En tu .env local define: JARVIS_DB_HOST / JARVIS_DB_USER /
+        # JARVIS_DB_PASSWORD / JARVIS_DB_NAME
         self.conn = mysql.connector.connect(
-            host="localhost",
-            user=os.getenv("MYSQL_USER", "root"),
-            password=os.getenv("MYSQL_PASSWORD", ""),
-            database="jarvisbot"
+            host=os.environ.get("JARVIS_DB_HOST", "localhost"),
+            user=os.environ.get("JARVIS_DB_USER", "root"),
+            password=os.environ.get("JARVIS_DB_PASSWORD", ""),
+            database=os.environ.get("JARVIS_DB_NAME", "jarvisbot")
         )
         self.conn.autocommit = True
         self._init_tables()

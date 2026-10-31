@@ -16,10 +16,15 @@ class RAGManager:
         # Asegurar que Ollama está corriendo (puedes levantarlo con systemd o manual)
         self.client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
         # Usamos OllamaEmbeddingFunction de ChromaDB
-        self.embed_fn = embedding_functions.OllamaEmbeddingFunction(
-            model_name=EMBED_MODEL,
-            url="http://localhost:11434/api/embeddings"
-        )
+        try:
+                    self.embed_fn = embedding_functions.OllamaEmbeddingFunction(
+                        model_name=EMBED_MODEL,
+                        url="http://localhost:11434/api/embeddings"
+                    )
+        except Exception:
+            from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+            self.embed_fn = DefaultEmbeddingFunction()
+            print('[RAG] Ollama no disponible -> embeddings default de ChromaDB (ONNX)')
         self.collection = self.client.get_or_create_collection(
             name=COLLECTION_NAME,
             embedding_function=self.embed_fn

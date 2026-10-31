@@ -3,7 +3,11 @@ import time
 import re
 import os
 
-from spotapi.public import Public
+# [PATCH_VOICE_GLOBAL]
+try:
+    from spotapi.public import Public
+except Exception:
+    pass
 from fuzzywuzzy import fuzz
 
 # ChromaDB para búsqueda semántica local

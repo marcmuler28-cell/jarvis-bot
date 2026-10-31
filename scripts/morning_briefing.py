@@ -81,12 +81,7 @@ Responde únicamente con el texto del briefing, sin notas adicionales."""
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Modelo no encontrado en {model_path}")
 
-    llm = Llama(
-        model_path=model_path,
-        n_ctx=2048,
-        n_threads=4,
-        verbose=False
-    )
+    llm = JarvisLLM()
 
     try:
         output = llm.create_chat_completion(
@@ -95,7 +90,7 @@ Responde únicamente con el texto del briefing, sin notas adicionales."""
             temperature=0.7,
             stop=["\n\n", "---"],
         )
-        generated = output['choices'][0]['message']['content'].strip()
+        generated = output  # [PATCH_STRING_LLM].strip()
         return generated
     finally:
         del llm  # liberar memoria

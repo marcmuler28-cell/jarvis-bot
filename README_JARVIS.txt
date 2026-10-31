@@ -49,7 +49,7 @@
    - ✅ _log_file_event() para registro de historial de archivos
 
 5. database.py
-   - Conexión a MySQL (localhost, root/<YOUR_MYSQL_PASSWORD>)
+   - Conexión a MySQL (credenciales por .env: JARVIS_DB_HOST/USER/PASSWORD/NAME)
    - Tablas: interactions, lessons, conflict_fixes
    - Guarda memoria del asistente (conversaciones, lecciones)
 
@@ -367,7 +367,7 @@ Comandos de terminal útiles:
 - Consultable por voz: "dónde está...", "qué archivos modifiqué..."
 
 
-Ver estado	systemctl --user status jarvisbot.service
-Reiniciar	systemctl --user restart jarvisbot.service
-Ver logs en tiempo real	journalctl --user -u jarvisbot.service -f
-Últimas 30 líneas	journalctl --user -u jarvisbot.service -n 30
+Ver estado      a
+Reiniciar       systemctl --user restart jarvisbot.service
+Ver logs en tiempo real journalctl --user -u jarvisbot.service -f
+Últimas 30 líneas       journalctl --user -u jarvisbot.service -n 30

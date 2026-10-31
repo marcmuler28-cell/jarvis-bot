@@ -26,7 +26,7 @@ class LLMTaskParser:
         )
         try:
             output = llm(prompt, max_tokens=100, temperature=0.0, stop=["\n\n"])
-            text = output["choices"][0]["text"].strip()
+            text = output  # [PATCH_STRING_LLM].strip()
             # Limpiar posibles ruidos
             text = re.sub(r'^.*?(\{.*\}).*$', r'\1', text, flags=re.DOTALL)
             data = json.loads(text)

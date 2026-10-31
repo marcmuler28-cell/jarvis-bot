@@ -16,7 +16,7 @@ users:
     display_name: "Marc 👑"
     voice_profile: "marc_embedding.npy"
     role: "admin"
-    pin: "CHANGE_ME"
+    pin: "1234"
     permissions: ["*"]
     denied_actions: []
     game_time_limit_minutes: null
@@ -26,7 +26,7 @@ users:
     display_name: "Jefferson 🎮"
     voice_profile: "jefferson_embedding.npy"
     role: "limited"
-    pin: "CHANGE_ME"
+    pin: "5678"
     permissions:
       - "open_app"
       - "spotify"

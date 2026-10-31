@@ -17,6 +17,7 @@ def parse_desktop_file(filepath):
     exec_cmd = None
     generic_name = None
     icon = None
+    categories = None
     no_display = False
     
     try:
@@ -31,6 +32,8 @@ def parse_desktop_file(filepath):
                     exec_cmd = line.split('=', 1)[1].split()[0]  # Solo el comando base
                 elif line.startswith('Icon=') and not icon:
                     icon = line.split('=', 1)[1]
+                elif line.startswith('Categories=') and not categories:
+                    categories = line.split('=', 1)[1]
                 elif line.startswith('NoDisplay='):
                     if 'true' in line.lower():
                         no_display = True
@@ -45,6 +48,8 @@ def parse_desktop_file(filepath):
         'generic_name': generic_name or '',
         'exec': exec_cmd,
         'icon': icon or '',
+        'categories': categories or '',
+        'desktop_path': filepath,
         'desktop_file': os.path.basename(filepath),
         'keywords': [
             name.lower(),
@@ -59,9 +64,14 @@ def build_cache():
     seen_names = set()
     
     # Directorios donde Linux guarda los .desktop
+    # Mismo orden que ~/.config/quickshell/scripts/apps.sh para que el
+    # catalogo de Jarvis coincida con el lanzador del escritorio.
     desktop_dirs = [
         '/usr/share/applications',
         os.path.expanduser('~/.local/share/applications'),
+        '/var/lib/flatpak/exports/share/applications',
+        os.path.expanduser('~/.local/share/flatpak/exports/share/applications'),
+        '/var/lib/snapd/desktop/applications',
         '/usr/local/share/applications',
     ]
     

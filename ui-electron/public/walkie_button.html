@@ -18,11 +18,16 @@
     align-items: center;
     justify-content: center;
     cursor: grab;
+    app-region: drag;
+    -webkit-app-region: drag;
+    border: 1px dashed rgba(0, 200, 255, 0.15);
+    border-radius: 12px;
   }
   .drag-area.dragging { cursor: grabbing; }
+  .drag-area:hover { border-color: rgba(0, 200, 255, 0.3); }
 
   .walkie-btn {
-    width: 110px; height: 110px;
+    width: 80px; height: 80px;
     border-radius: 50%;
     background: rgba(0, 20, 40, 0.75);
     border: 2px solid rgba(0, 200, 255, 0.5);
@@ -42,6 +47,8 @@
     letter-spacing: 1px;
     position: relative;
     z-index: 5;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
   }
   .walkie-btn:hover {
     background: rgba(0,200,255,0.15);
@@ -72,6 +79,8 @@
     box-shadow: 0 0 30px rgba(0, 200, 255, 0.3);
     backdrop-filter: blur(10px);
     z-index: 10;
+    app-region: no-drag;
+    -webkit-app-region: no-drag;
   }
   .pin-title {
     color: #00c8ff; font-size: 14px; letter-spacing: 2px; margin-bottom: 8px; font-weight: bold;
@@ -145,8 +154,8 @@
     const socket = io('http://127.0.0.1:5000', {
       autoConnect: true,
       reconnection: true,
-      reconnectionAttempts: 100,  // Intentar 100 veces
-      reconnectionDelay: 2000,    // Cada 2 segundos
+      reconnectionAttempts: 100,
+      reconnectionDelay: 2000,
       transports: ['polling', 'websocket']
     });
 
@@ -159,9 +168,6 @@
     let isLoggedIn = false;
     let currentPin = '';
     let isPressed = false;
-    let isDragging = false;
-    let mouseDownTime = 0;
-    const DRAG_THRESHOLD_MS = 200;
     const BUTTON_SIZE = 140;
     const PIN_SIZE_W = 260;
     const PIN_SIZE_H = 360;
@@ -223,40 +229,13 @@
       }
     });
 
-    // === ARRASTRE Y CLICS ===
-    document.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.walkie-btn') || e.target.closest('.pin-panel') || e.target.tagName === 'BUTTON') {
-        return;
-      }
-      mouseDownTime = Date.now();
-      isDragging = false;
-      ipcRenderer.send('button-drag-start', e.clientX, e.clientY);
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (e.buttons !== 1) return;
-      const elapsed = Date.now() - mouseDownTime;
-      if (elapsed > DRAG_THRESHOLD_MS) {
-        isDragging = true;
-        dragArea.classList.add('dragging');
-        if (isPressed) stopListening();
-      }
-    });
-
-    document.addEventListener('mouseup', (e) => {
-      dragArea.classList.remove('dragging');
-      if (isDragging) {
-        ipcRenderer.send('button-drag-end');
-        isDragging = false;
-      }
-    });
+    // === ARRASTRE: manejado nativamente por KWin vía CSS app-region: drag ===
+    // No se necesita JavaScript. El compositor mueve la ventana usando
+    // xdg_toplevel.move (única forma nativa en Wayland).
 
     // CLIC IZQUIERDO: Walkie Talkie
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Si está arrastrando, ignorar
-      if (isDragging) return;
-
       if (isPressed) {
         stopListening();
       } else {
@@ -266,19 +245,10 @@
 
     // CLIC DERECHO: Abrir/Cerrar Dashboard
     btn.addEventListener('contextmenu', (e) => {
-      e.preventDefault(); // Evitar menú contextual por defecto
+      e.preventDefault();
       e.stopPropagation();
-      if (isDragging) return;
-
       ipcRenderer.send('dashboard-toggle');
       console.log('[BUTTON] Dashboard toggle (right click)');
-    });
-
-    // Registrar mousedown para arrastre
-    btn.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      mouseDownTime = Date.now();
-      isDragging = false;
     });
 
     function startListening() {
@@ -361,7 +331,6 @@
     drawMiniAtom();
 
     // Al iniciar, SIEMPRE mostrar panel de PIN
-    // (incluso si la ventana de Electron se reinicia sin cerrar la app)
     setTimeout(showPinPanel, 500);
 
     // Si el backend se desconecta, volver a pedir PIN

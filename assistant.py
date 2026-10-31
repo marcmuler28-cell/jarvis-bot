@@ -28,6 +28,19 @@ import threading
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
+# [VENTANAS_V3] Conciencia de ventanas Hyprland + puente a jarvis-skills
+try:
+    from jarvis_windows import Ventanas, parse_mover
+except Exception as _e_v3:
+    print(f"[VENTANAS_V3] jarvis_windows no disponible: {_e_v3}")
+    Ventanas = None
+    parse_mover = None
+try:
+    import jarvis_skills_bridge as _skills_v3
+except Exception as _e_v3:
+    print(f"[VENTANAS_V3] jarvis_skills_bridge no disponible: {_e_v3}")
+    _skills_v3 = None
+
 class FileChangeHandler(FileSystemEventHandler):
     def __init__(self, tools):
         self.tools = tools
@@ -66,7 +79,11 @@ def start_file_monitor(tools):
     observer.start()
     return observer
 import numpy as np
-import sounddevice as sd
+# [PATCH_CHAT_MODE]
+try:
+    import sounddevice as sd
+except Exception:
+    pass
 
 try:
     import pyautogui
@@ -90,13 +107,21 @@ except ImportError:
     SPOTIFY_AVAILABLE = False
     print("⚠️ spotify_manager no encontrado. Comandos de Spotify desactivados.")
 
-from faster_whisper import WhisperModel
-from llama_cpp import Llama
+# [PATCH_CHAT_MODE]
+try:
+    from faster_whisper import WhisperModel
+except Exception:
+    pass
+from llm_provider import JarvisLLM
 
 pynput_mouse = None
 pynput_keyboard = None
 
-from openwakeword.model import Model
+# [PATCH_CHAT_MODE]
+try:
+    from openwakeword.model import Model
+except Exception:
+    pass
 
 from config import TEXT_MODE, MODEL_FAST, MODEL_POWERFUL, CTX_SIZE, MAX_REACT_STEPS, PATHS, POWER_COMMANDS, SELF_IMPROVER_ENABLED, WHISPER_SIZE, LOG_LEVEL
 from logger_config import logger
@@ -206,7 +231,7 @@ Pensamiento: (tu razonamiento breve sobre qué hacer)
 Acción: herramienta|argumento1,argumento2
 Respuesta final: (tu mensaje final al usuario)
 
-Herramientas disponibles: open_app, spotify_liked_songs, read_file, run_command, move_mouse, click, type_text, press_key, screenshot, copy_file, move_file, create_folder, list_folder, drag_file, list_processes, write_file, set_brightness, get_brightness, set_volume, get_volume, lock_session, system_status, pending_updates, service_status, kill_process.
+Herramientas disponibles: open_app, spotify_liked_songs, read_file, run_command, move_mouse, click, type_text, press_key, screenshot, copy_file, move_file, create_folder, list_folder, drag_file, list_processes, write_file, set_brightness, get_brightness, set_volume, get_volume, lock_session, system_status, pending_updates, service_status, kill_process, move_window, list_windows, focus_window, bring_window, close_window, maximize_window, organize_downloads, find_file, peli_estado.
 
 Instrucciones de herramientas:
 - spotify_liked_songs (sin argumentos) Abre Spotify en «Tus me gusta» e intenta reproducir música de esa lista. Usar una sola acción: spotify_liked_songs|
@@ -225,6 +250,15 @@ Instrucciones de herramientas:
 - set_volume|valor (Ajusta el volumen, ej: 40%, 80, 10%+ para subir 10%)
 - get_volume| (Obtiene el volumen actual)
 - lock_session| (Bloquea la sesion del sistema)
+- move_window|app,workspace (Mueve una ventana YA abierta al workspace indicado)
+- list_windows| (Lista las ventanas abiertas por workspace)
+- focus_window|nombre (Enfoca una ventana por su nombre)
+- bring_window|nombre (Trae la ventana al workspace actual y la enfoca)
+- close_window|nombre (Cierra UNA ventana por nombre, sin matar el proceso)
+- maximize_window|nombre (Maximiza la ventana indicada)
+- organize_downloads| (Ordena ~/Descargas con las reglas de Jarvis)
+- find_file|termino (Busca un archivo real en el home)
+- peli_estado| (Estado del pipeline de películas)
 - system_status| (Muestra CPU, RAM y disco)
 - pending_updates| (Comprueba actualizaciones pendientes de pacman)
 - service_status|nombre (Estado de un servicio systemd)
@@ -237,20 +271,12 @@ Memoria y contexto:
 Usuario: {user_input}
 Pensamiento:"""
 
-    def __init__(self, fast_model_path, powerful_model_path, ctx_size=CTX_SIZE):
+    def __init__(self, fast_model_path=None, powerful_model_path=None, ctx_size=CTX_SIZE):
         self.powerful_model_path = powerful_model_path
         self.ctx_size = ctx_size
         try:
             logger.info("Cargando modelo rápido (Qwen 3B)...")
-            self.llm_fast = Llama(
-                model_path=fast_model_path,
-                n_ctx=ctx_size,
-                n_threads=4,
-                n_batch=256,
-                n_gpu_layers=0,
-                seed=42,
-                verbose=False
-            )
+            self.llm_fast = JarvisLLM(tier='fast')
             logger.info("Modelo rápido cargado.")
         except Exception as e:
             logger.error(f"Error cargando modelo rápido: {e}")
@@ -258,6 +284,21 @@ Pensamiento:"""
         self.llm_powerful = None
         self.current_llm = self.llm_fast
         self.tools = SystemTools()
+        # [VENTANAS_V3] ventanas + skills como herramientas (fast-path y LLM)
+        self.ventanas = Ventanas() if Ventanas else None
+        try:
+            if self.ventanas:
+                self.tools.actions.update({
+                    "list_windows": self.ventanas.listar,
+                    "focus_window": self.ventanas.enfocar,
+                    "bring_window": self.ventanas.traer,
+                    "close_window": self.ventanas.cerrar,
+                    "maximize_window": self.ventanas.maximizar,
+                })
+            if _skills_v3:
+                self.tools.actions.update(_skills_v3.registrar())
+        except Exception as _e_v3:
+            print(f"[VENTANAS_V3] no pude registrar herramientas extra: {_e_v3}")
         self.memory = MemoryManager()
         self.taskwarrior = TaskwarriorSkill()
         self.skills = {
@@ -309,15 +350,7 @@ Pensamiento:"""
         if self.llm_powerful is None:
             try:
                 logger.info("Cargando modelo potente (Qwen 7B) bajo demanda...")
-                self.llm_powerful = Llama(
-                    model_path=self.powerful_model_path,
-                    n_ctx=self.ctx_size,
-                    n_threads=4,
-                    n_batch=256,
-                    n_gpu_layers=0,
-                    seed=42,
-                    verbose=False
-                )
+                self.llm_powerful = JarvisLLM(tier='powerful')
                 logger.info("Modelo potente cargado.")
             except Exception as e:
                 logger.error(f"Error cargando modelo potente: {e}")
@@ -489,7 +522,7 @@ Pensamiento:"""
                 stop=["\n", "Instrucción:"],
                 temperature=0.2
             )
-            text_alt = output["choices"][0]["text"].strip()
+            text_alt = output  # [PATCH_STRING_LLM].strip()
             text_alt = re.sub(r'[0-9]\.', '', text_alt)
             text_alt = text_alt.replace("\n", ",").replace(";", ",")
             
@@ -566,6 +599,57 @@ Pensamiento:"""
         ]
         return any(ind in texto.lower() for ind in indicadores)
 
+    # "mueve discord al workspace 4" / "manda spotify al 3"
+    _WINDOW_MOVE_WS_RE = re.compile(
+        r"\b(?:mueve|manda|pasa|lleva|traslada|envia|envía|devuelve|regresa|move|send)\s+"
+        r"(?:(?:la|el)\s+)?(?:ventana\s+(?:de\s+|del\s+)?)?"
+        r"(?P<app>[\w\.\-\s]+?)\s+"
+        r"(?:al?|a\s+la|a\s+el|para\s+el|hacia\s+el|to\s+(?:the\s+)?)\s*"
+        r"(?:workspace|escritorio|escritorios|ws|desktop|espacio)\s*"
+        r"(?P<ws>\d{1,2}|siguiente|anterior|next|prev)\b"
+    )
+
+    _WINDOW_MOVE_SHORT_RE = re.compile(
+        r"\b(?:mueve|manda|pasa|lleva|traslada|envia|envía|devuelve|regresa)\s+"
+        r"(?:(?:la|el)\s+)?(?:(?:ventana|app|aplicacion|aplicación)\s+(?:de\s+|del\s+)?)?"
+        r"(?P<app>[\w\.\-\s]+?)\s+al?\s+(?P<ws>\d{1,2})\s*$"
+    )
+
+    _MOVE_VERBS = ("mueve", "muevas", "mover", "manda", "mandar", "pasa", "pasar",
+                   "lleva", "llevar", "traslada", "trasladar", "envia", "envia",
+                   "muevan", "mueva", "devuelve", "devolver", "regresa", "regresar",
+                   "move", "send")
+
+    def _corrige_verbo(self, texto):
+        """Acepta erratas leves: 'mueje dota2' -> 'mueve dota2'."""
+        import difflib
+        tokens = (texto or "").split()
+        for i, tok in enumerate(tokens[:3]):
+            limpio = re.sub(r"[^a-z]", "", tok.lower())
+            if not (3 <= len(limpio) <= 9):
+                continue
+            if limpio in self._MOVE_VERBS:
+                break
+            cerca = difflib.get_close_matches(limpio, list(self._MOVE_VERBS), n=1, cutoff=0.75)
+            if cerca:
+                tokens[i] = cerca[0]
+                return " ".join(tokens)
+        return texto
+
+    def _parse_window_move(self, text):
+        """[VENTANAS_V3] Interpreta frases de mover/traer ventana.
+        Devuelve dict {'accion','app','ws','follow'} o None.
+        El parser universal vive en jarvis_windows.parse_mover y entiende:
+        mueve/mover/mueva/manda/pasa/pasalo/lleva/envia/devuelve/trae...
+        destinos: al 3, al workspace 3, al escritorio de juegos, al siguiente;
+        ignora: mouse/raton, volumen, brillo, pantalla completa."""
+        if not parse_mover:
+            return None
+        try:
+            return parse_mover(text)
+        except Exception:
+            return None
+
     def _fast_path(self, user_input):
         text = normalizar(user_input)
         text_norm = normalizar(text)
@@ -593,6 +677,28 @@ Pensamiento:"""
             )
             self.memory.add_interaction(user_input, response, [{"action": "help", "args": [], "result": response}])
             return response, []
+
+        # --- [VENTANAS_V3] Ver ventanas abiertas (conciencia de escritorio) ---
+        if any(p in text for p in (
+            "ventanas abiertas", "ventanas activas", "que ventanas", "mis ventanas",
+            "lista de ventanas", "lista ventanas", "muestra las ventanas",
+            "ver ventanas", "que tengo abierto", "que hay abierto", "que estas viendo",
+        )):
+            response = (self.ventanas.listar() if self.ventanas
+                        else "Ahora mismo no tengo acceso a Hyprland.")
+            self.memory.add_interaction(user_input, response,
+                                        [{"action": "list_windows", "args": [],
+                                          "result": response}])
+            return response, []
+
+        # --- [JARVIS_SKILLS_V3] Descargas / pelis (puente a los skills) ---
+        if _skills_v3:
+            respuesta_skill = _skills_v3.intentar(text)
+            if respuesta_skill is not None:
+                self.memory.add_interaction(user_input, respuesta_skill,
+                                            [{"action": "jarvis_skill", "args": [text],
+                                              "result": respuesta_skill}])
+                return respuesta_skill, []
 
         # --- Spotify: Reproducir playlist por nombre ---
         if SPOTIFY_AVAILABLE:
@@ -858,7 +964,7 @@ No incluyas nada más. Respuesta final:"""
                     temperature=0.3,
                     stop=["\n\n", "Ejemplo:"],
                 )
-                summary_text = output["choices"][0]["text"].strip()
+                summary_text = output  # [PATCH_STRING_LLM].strip()
                 if not summary_text:
                     summary_text = "No pude generar el resumen. Aquí tienes los datos en crudo:\n" + resumen
 
@@ -1052,7 +1158,9 @@ No incluyas nada más. Respuesta final:"""
                 ("calc", "calculadora"),
                 ("terminal", "terminal"),
                 ("explorador", "explorador"),
-                ("firefox", "Firefox"),
+                ("firefox", "firefox"),
+                ("navegador", "navegador"),
+                ("browser", "navegador"),
                 ("chrome", "Chrome"),
                 ("brave", "Brave"),
             ]
@@ -1065,6 +1173,22 @@ No incluyas nada más. Respuesta final:"""
                         response = f"Cerrando {app_label}. {result_str}"
                         self.memory.add_interaction(user_input, response, [{"action": "close_app", "args": [app_key], "result": result_str}])
                         return response, []
+            # --- Mover/traer una ventana ya abierta (Hyprland) [VENTANAS_V3] ---
+            movida = self._parse_window_move(text)
+            if movida:
+                app_name = movida["app"]
+                ws = movida.get("ws")
+                follow = movida.get("follow", False)
+                if self.ventanas:
+                    if movida["accion"] == "traer":
+                        result_str = (self.ventanas.mover(app_name, ws, follow=True)
+                                      if ws else self.ventanas.traer(app_name))
+                    else:
+                        result_str = self.ventanas.mover(app_name, ws, follow)
+                else:
+                    result_str = self.tools.move_window_to_workspace(app_name, ws, follow)
+                self.memory.add_interaction(user_input, result_str, [{"action": "move_window", "args": [app_name, ws], "result": result_str}])
+                return result_str, []
 
         # --- Panel Quickshell: cerrar barra métricas (voz, Linux) ---
         if platform.system() == "Linux":
@@ -1087,13 +1211,17 @@ No incluyas nada más. Respuesta final:"""
                 "cierra el panel",
                 "quita metricas",
             ]
-            if fuzzy_match(text, close_metric_keywords) or (
-                ("cierra" in text or "cerrar" in text or "quita" in text or "oculta" in text)
-                and (
-                    ("métricas" in text or "metricas" in text)
-                    or ("hud" in text and ("gpu" in text or "panel" in text or "rendimiento" in text))
-                    or "quickshell" in text
-                )
+            # Exigir tema de metricas: fuzzy_match compara solo el prefijo de
+            # 5 letras, asi que sin esto "cierra el navegador" caia aqui.
+            tema_metricas = (
+                "métrica" in text or "metrica" in text
+                or "hud" in text or "quickshell" in text or "gpu" in text
+                or "panel" in text or "rendimiento" in text
+            )
+            if tema_metricas and (
+                fuzzy_match(text, close_metric_keywords)
+                or "cierra" in text or "cerrar" in text
+                or "quita" in text or "oculta" in text
             ):
                 try:
                     subprocess.run(
@@ -1238,17 +1366,26 @@ No incluyas nada más. Respuesta final:"""
 
         # --- Gestión de Ventanas ---
         if fuzzy_match(text, ["minimizar", "minimiza ventana", "minimiza la ventana", "minimiza"]):
-            response = "Gestión de ventanas no está soportada de forma confiable en Linux desde este asistente."
+            response = (self.ventanas.minimizar() if self.ventanas
+                        else "No puedo manejar ventanas (falta jarvis_windows.py).")
             self.memory.add_interaction(user_input, response, [])
             return response, []
             
         if fuzzy_match(text, ["maximizar", "maximiza ventana", "maximiza", "agranda"]):
-            response = "Gestión de ventanas no está soportada de forma confiable en Linux desde este asistente."
+            response = (self.ventanas.maximizar() if self.ventanas
+                        else "No puedo manejar ventanas (falta jarvis_windows.py).")
             self.memory.add_interaction(user_input, response, [])
             return response, []
             
+        if any(kw in text for kw in ["pantalla completa", "pantalla entera", "fullscreen"]):
+            response = (self.ventanas.pantalla_completa() if self.ventanas
+                        else "No puedo manejar ventanas (falta jarvis_windows.py).")
+            self.memory.add_interaction(user_input, response, [])
+            return response, []
+
         if any(kw in text for kw in ["cierra ventana", "cerrar ventana", "cierra la ventana"]):
-            response = "Cerrar ventanas por voz no está soportado directamente en Linux."
+            response = (self.ventanas.cerrar("activa") if self.ventanas
+                        else "No puedo manejar ventanas (falta jarvis_windows.py).")
             self.memory.add_interaction(user_input, response, [])
             return response, []
             
@@ -1582,6 +1719,19 @@ No incluyas nada más. Respuesta final:"""
 
 
         # --- Busqueda en historial de archivos ---
+        # [JARVIS_SKILLS_V3] primero busco en disco real (jarvis-buscar);
+        # si no hay resultados, caigo al historial de archivos de siempre.
+        if _skills_v3 and any(phrase in text for phrase in ("donde esta", "donde guarde")):
+            m_termino = re.search(
+                r"(?:donde esta|donde guarde)\s+(?:el|la|los|las|mi|un|una)?\s*(.+)", text)
+            if m_termino:
+                res_busqueda = _skills_v3.buscar_termino(m_termino.group(1).strip())
+                if res_busqueda:
+                    self.memory.add_interaction(
+                        user_input, res_busqueda,
+                        [{"action": "find_file", "args": [m_termino.group(1).strip()],
+                          "result": res_busqueda}])
+                    return res_busqueda, []
         if any(phrase in text for phrase in ["donde esta", "donde guarde", "busca archivo", "archivos de ayer", "que modifique", "archivos recientes"]):
             import json as _json, os as _os, time as _time
             hist_file = _os.path.expanduser("~/.jarvis/file_history.json")
@@ -1603,7 +1753,7 @@ No incluyas nada más. Respuesta final:"""
                     self.load_powerful_model()
                     prompt = f"""Basandote en el siguiente historial de archivos, responde de forma concisa a la pregunta del usuario.\n\n{summary}\n\nPregunta: {user_input}\nRespuesta:"""
                     output = self.llm_powerful(prompt, max_tokens=150, temperature=0.1)
-                    response = output["choices"][0]["text"].strip()
+                    response = output  # [PATCH_STRING_LLM].strip()
             self.memory.add_interaction(user_input, response, [])
             return response, []
 
@@ -1965,7 +2115,7 @@ No incluyas nada más. Respuesta final:"""
             t5 = time.time()
             print(f"[⏱️ LLM_INFERENCE] {t5-t4:.2f}s (modelo: {'potente' if self.current_llm == self.llm_powerful else 'rápido'})", flush=True)
             self.health.record_llm_call(t5 - t4)
-            response_text = output["choices"][0]["text"].strip()
+            response_text = output  # [PATCH_STRING_LLM].strip()
             if not response_text.startswith("Pensamiento:"):
                 response_text = "Pensamiento: " + response_text
             try:
@@ -2014,7 +2164,7 @@ No incluyas nada más. Respuesta final:"""
                     temperature=0.2,
                     repeat_penalty=1.2
                 )
-                response_text = output["choices"][0]["text"].strip()
+                response_text = output  # [PATCH_STRING_LLM].strip()
                 if not response_text.startswith("Pensamiento:"):
                     response_text = "Pensamiento: " + response_text
                 self.health.record_parse_retry()

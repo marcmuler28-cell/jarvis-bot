@@ -6,7 +6,11 @@ No requiere token de Spotify. Usa spotapi y Ollama (nomic-embed-text).
 import os
 import chromadb
 from chromadb.utils import embedding_functions
-from spotapi.public import Public
+# [PATCH_VOICE_GLOBAL]
+try:
+    from spotapi.public import Public
+except Exception:
+    pass
 import time
 
 COLLECTION_NAME = "spotify_songs"

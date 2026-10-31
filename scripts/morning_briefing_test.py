@@ -117,7 +117,7 @@ Responde únicamente con el texto del briefing, sin notas adicionales."""
             temperature=0.7,
             stop=["\n\n", "---"],
         )
-        generated = output['choices'][0]['message']['content'].strip()
+        generated = output  # [PATCH_STRING_LLM].strip()
         return generated
     finally:
         del llm  # liberar memoria

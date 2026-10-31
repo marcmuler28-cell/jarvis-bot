@@ -9,8 +9,16 @@ import wave
 import subprocess
 import shutil
 import numpy as np
-import sounddevice as sd
-from faster_whisper import WhisperModel
+# [PATCH_VOICE_GLOBAL]
+try:
+    import sounddevice as sd
+except Exception:
+    pass
+# [PATCH_VOICE_GLOBAL]
+try:
+    from faster_whisper import WhisperModel
+except Exception:
+    pass
 from config import (
     AUDIO_INPUT_DEVICE,
     AUDIO_OUTPUT_DEVICE,

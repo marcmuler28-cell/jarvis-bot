@@ -1,4 +1,3 @@
-import os
 import requests
 import json
 from flask import Flask, request, jsonify, render_template_string
@@ -11,9 +10,9 @@ app = Flask(__name__)
 db = MemoryManager()
 skill = BlackboardSkill(db_manager=db)
 
-PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
-ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
-VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "")
+PHONE_NUMBER_ID = "1109172922279619"
+ACCESS_TOKEN = "EAAZAYB36enDgBRud9ZAr5K9CquO2AHULELlh5YaRmKG8NxmURJPldCWGEqPrsiSPsMDQSLtbLBN9iR35I13YejKY9Bh0TAjmLHKAkHw21ZA0l4ZBI8wic9iiWKBSSplDgOMxro5ZAY9wD4LlhcqxZCtNGtg3g9zSkU7U0imdYUjExb0fyCOCeS7jh2BcUZCgEOp4puuVoXe9zeWkiyW6bK6cT1Elm8ZAiPYL44tRhuZC8XcIbCH3SGYUfoVp7SeBCOADVm6AITRlfgQdZAcfdQ1d7ZBPNfs"
+VERIFY_TOKEN = "jarvis_token_secreto_2025"
 OLLAMA_MODEL = "qwen2.5-coder:7b"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
