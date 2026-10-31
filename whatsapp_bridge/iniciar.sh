@@ -28,5 +28,14 @@ for c in /usr/bin/chromium /usr/bin/chromium-browser /usr/bin/google-chrome-stab
   if [ -x "$c" ]; then export CHROME_PATH="$c"; break; fi
 done
 
+# 4) Escucha de TU chat propio: te escribes desde el celular y Jarvis responde
+#    («mis notas», «ayuda»...). Log en ~/.jarvis/wa_escucha.log
+if command -v python3 >/dev/null 2>&1; then
+  pkill -f "jarvis_whatsapp.py escuchar" 2>/dev/null || true
+  mkdir -p "$HOME/.jarvis"
+  (cd .. && nohup python3 jarvis_whatsapp.py escuchar >> "$HOME/.jarvis/wa_escucha.log" 2>&1 & disown) || true
+  echo "👂 Escucha de tu chat propio lanzada (log: ~/.jarvis/wa_escucha.log)"
+fi
+
 echo "▶ Puente de WhatsApp escuchando en 127.0.0.1:5015  (Ctrl+C para parar)"
 exec node server.js

@@ -33,6 +33,8 @@ CLI de prueba:
   python3 jarvis_whatsapp.py contactos
   python3 jarvis_whatsapp.py guarda luis +51999888777
   python3 jarvis_whatsapp.py enviar mama "ya llegué"
+  python3 jarvis_whatsapp.py enviar yo "nota mental"
+  python3 jarvis_whatsapp.py escuchar   # responde lo que te escribas a ti mismo
 """
 
 import difflib
@@ -88,6 +90,15 @@ PLANTILLA_CONTACTOS = {
 MSG_BRIDGE_APAgado = ("🔌 El puente de WhatsApp no está corriendo. En una terminal:\n"
                       "    cd ~/Proyectos/JarvisBot/whatsapp_bridge && ./iniciar.sh\n"
                       "(la primera vez pide escanear un QR con tu WhatsApp).")
+
+RESPUESTA_POR_DEFECTO = (
+    "🤖 Aquí Jarvis. Desde este chat puedes pedirme:\n"
+    "  • «mis notas»  /  «notas de <curso>»\n"
+    "  • «mis mensajes» del aula\n"
+    "  • «mi horario»  /  «mis cursos»\n"
+    "  • «estado»  /  «envia whatsapp a <alguien>: texto»\n"
+    "Si el aula responde sin datos, pídelo en la PC: «abre cibertec» "
+    "(y si pide código SMS, corre antes `python3 login_unificado.py`).")
 
 
 def _norm(texto: str) -> str:
@@ -227,10 +238,28 @@ def estado():
     return "📱 WhatsApp sin sesión: escanea el QR del puente (terminal o /qr)."
 
 
+def _mi_numero():
+    """Tu propio número (wid del puente) o "" si aún no hay sesión."""
+    try:
+        d = _get("/status")
+        return str((d.get("info") or {}).get("wid") or "")
+    except Exception:
+        return ""
+
+
+def _es_yo(destinatario):
+    """True si el destinatario es uno mismo («yo», «mi», «mismo»)."""
+    return _norm_apodo(destinatario or "") in ("yo", "mi", "mismo", "mimeamo")
+
+
 def enviar(destinatario, mensaje):
     """Envía `mensaje` al contacto/número. Devuelve str para el chat."""
     destino = None
-    if destinatario:
+    if _es_yo(destinatario):
+        destino = _mi_numero()
+        if not destino:
+            return "No sé todavía cuál es tu número (¿el puente ya arrancó?)."
+    elif destinatario:
         res = resolver(destinatario)
         if res:
             destino = _normalizar_numero(res[1])
@@ -395,6 +424,86 @@ def intentar(texto):
 
 
 # ─────────────────────────────────────────────────────────────
+# Escucha tu chat propio: te escribes desde el celular y Jarvis responde
+# ─────────────────────────────────────────────────────────────
+
+def _modulo_cibertec():
+    """cibertec_bridge si se puede importar (corre desde la raíz del repo)."""
+    try:
+        import cibertec_bridge
+        return cibertec_bridge
+    except Exception:
+        return None
+
+
+def responder_como_jarvis(texto, cb=None):
+    """Respuesta de Jarvis a un mensaje escrito en TU chat propio.
+    Orden: comandos WhatsApp -> aula CIBERTEC -> menú de ayuda."""
+    if not _norm(texto):
+        return None
+    r = intentar(texto)  # estado, agenda, envíos, guarda contacto…
+    if r:
+        return r
+    if cb is None:
+        cb = _modulo_cibertec()
+    if cb is not None:
+        try:
+            r = cb.intentar(texto)  # notas / mensajes / horario / cursos
+            if r:
+                return r
+        except Exception:
+            pass
+    return RESPUESTA_POR_DEFECTO
+
+
+def procesar_mensajes(mensajes, vistos, cb=None, enviar_fn=None):
+    """Procesa la lista {id, ts, texto} que trae el puente; responde UNA vez
+    por id (vistos: deque de ids ya contestados). Devuelve el mayor ts visto."""
+    enviar_fn = enviar_fn or (lambda txt: enviar("yo", txt))
+    ultimo_ts = 0
+    for m in mensajes or []:
+        mid = str(m.get("id") or "")
+        ts = int(m.get("ts") or 0)
+        texto = str(m.get("texto") or "").strip()
+        ultimo_ts = max(ultimo_ts, ts)
+        if not texto or not mid or mid in vistos:
+            continue
+        vistos.append(mid)
+        r = responder_como_jarvis(texto, cb=cb)
+        if r:
+            print(f"   🤖 respondo: {str(r).splitlines()[0][:60]}", flush=True)
+            enviar_fn(r)
+    return ultimo_ts
+
+
+def escuchar():
+    """Bucle: lee TU chat propio desde el puente y responde como Jarvis.
+    Escríbete «ayuda» desde el celular para ver qué entiende."""
+    import collections
+    import time
+    print("👂 Jarvis escucha tu chat propio. Escríbete «ayuda» desde el celular "
+          "(Ctrl+C para salir).", flush=True)
+    vistos = collections.deque(maxlen=200)
+    desde = int(time.time())
+    cb = _modulo_cibertec()
+    aviso_puente = False
+    while True:
+        try:
+            d = _get(f"/mensajes?desde={desde}", timeout=15)
+            aviso_puente = False
+            nuevo = procesar_mensajes(d.get("mensajes"), vistos, cb=cb)
+            if nuevo > desde:
+                desde = nuevo
+        except KeyboardInterrupt:
+            raise
+        except Exception:
+            if not aviso_puente:
+                print(MSG_BRIDGE_APAgado, flush=True)
+                aviso_puente = True
+        time.sleep(3)
+
+
+# ─────────────────────────────────────────────────────────────
 # Herramientas para el LLM (ReAct)
 # ─────────────────────────────────────────────────────────────
 
@@ -430,6 +539,8 @@ if __name__ == "__main__":
             print(guardar_contacto(sys.argv[2], sys.argv[3]))
         elif cmd == "enviar" and len(sys.argv) >= 4:
             print(enviar(sys.argv[2], sys.argv[3]))
+        elif cmd == "escuchar":
+            escuchar()
         else:
             print(__doc__)
     else:

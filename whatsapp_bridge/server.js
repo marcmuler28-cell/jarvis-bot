@@ -9,10 +9,13 @@
  *
  * Endpoints (todos exigen X-Jarvis-Token == JARVIS_WA_BRIDGE_TOKEN,
  * o ?t=TOKEN para abrir el QR desde el navegador):
- *   GET  /status  -> {ready, iniciando, conQR, info}
- *   GET  /qr      -> página HTML con el QR (o JSON si ?json=1)
- *   POST /send    -> {to: "5199...", message: "texto"}  (solo números; el
- *                    apodo lo resuelve antes jarvis_whatsapp.py)
+ *   GET  /status    -> {ready, iniciando, conQR, info}
+ *   GET  /qr        -> página HTML con el QR (o JSON si ?json=1)
+ *   POST /send      -> {to: "5199...", message: "texto"}  (solo números; el
+ *                      apodo lo resuelve antes jarvis_whatsapp.py)
+ *   GET  /mensajes?desde=EPOCH -> mensajes escritos en TU PROPIO chat
+ *                      (te escribes a ti mismo desde el celular y Jarvis
+ *                      los lee con `python3 jarvis_whatsapp.py escuchar`)
  *
  * Escucha SOLO en 127.0.0.1: nadie de tu red puede hablar con él.
  */
@@ -41,6 +44,11 @@ let qrDataUrl = null;
 let listo = false;
 let iniciando = true;
 let authYaAvisado = false;
+
+// Chat propio: mensajes que MARC escribe a sí mismo desde el celular.
+const arrancadoEn = Math.floor(Date.now() / 1000);
+const colaChat = [];              // {id, ts, texto} — solo el chat propio
+const idsDelPuente = new Set();   // ids que ESTE puente envió (para no re-leerlos)
 
 /** true si el mensaje es un «estado» de WhatsApp o un broadcast, no un chat */
 function esEstado(msg) {
@@ -92,6 +100,22 @@ client.on('message', (msg) => {
   if (!msg.fromMe && msg.body) {
     log('💬 mensaje entrante de', msg.from, '→', String(msg.body).slice(0, 80));
   }
+});
+
+// message_create SÍ dispara para mensajes escritos desde tu propio celular
+// (el evento 'message' ignora los fromMe). Solo nos interesa TU chat propio.
+client.on('message_create', (msg) => {
+  if (esEstado(msg)) return;
+  const serial = msg.id && (msg.id._serialized || msg.id.id);
+  if (serial && idsDelPuente.has(serial)) return; // respuesta que envió Jarvis
+  const mio = client.info && client.info.wid ? client.info.wid._serialized : null;
+  if (!mio || !msg.fromMe || msg.from !== mio) return; // solo el chat contigo
+  if ((msg.timestamp || 0) < arrancadoEn) return;      // historial viejo
+  const texto = String(msg.body || '').trim();
+  if (!texto) return;
+  colaChat.push({ id: serial || '', ts: msg.timestamp || arrancadoEn, texto });
+  if (colaChat.length > 200) colaChat.splice(0, colaChat.length - 200);
+  log('💬 TÚ (chat propio):', texto.slice(0, 80));
 });
 
 client.initialize().catch((e) => {
@@ -153,7 +177,15 @@ async function enviar(to, message) {
   if (digits.length < 9) {
     throw httpError(400, `número inválido: «${to}» (esperado código de país + número)`);
   }
-  const wid = await client.getNumberId(digits); // null si no tiene WhatsApp
+  // Enviarte a TI MISMO: getNumberId a veces falla con tu propio número;
+  // usamos directamente el wid de la sesión.
+  const propioUser = client.info && client.info.wid ? client.info.wid.user : null;
+  let wid = null;
+  if (propioUser && digits === propioUser) {
+    wid = client.info.wid;
+  } else {
+    wid = await client.getNumberId(digits); // null si no tiene WhatsApp
+  }
   if (!wid) {
     throw httpError(404, `el número +${digits} no tiene WhatsApp registrado`);
   }
@@ -166,6 +198,12 @@ async function enviar(to, message) {
     if (!enviado || !enviado.id) {
       throw new Error('WhatsApp no devolvió confirmación del envío');
     }
+    // Recordar los ids que envió el puente para no volver a leerlos como
+    // si fueran órdenes tuyas (evita el bucle Jarvis ↔ Jarvis).
+    try {
+      idsDelPuente.add(enviado.id._serialized || enviado.id.id);
+      if (idsDelPuente.size > 1000) idsDelPuente.clear();
+    } catch (_) {}
     log('📤 enviado a', wid._serialized);
     return { ok: true, chatId: wid._serialized, id: enviado.id._serialized };
   } catch (e) {
@@ -212,6 +250,14 @@ const server = http.createServer(async (req, res) => {
         }
       });
       return;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/mensajes') {
+      const desde = parseInt(url.searchParams.get('desde') || '0', 10) || 0;
+      const ahora = Math.floor(Date.now() / 1000);
+      // purga: nada de más de 1 hora
+      while (colaChat.length && ahora - colaChat[0].ts > 3600) colaChat.shift();
+      return json(res, 200, { ok: true, mensajes: colaChat.filter((m) => m.ts > desde) });
     }
 
     if (req.method === 'GET' && url.pathname === '/health') {

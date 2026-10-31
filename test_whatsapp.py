@@ -7,6 +7,7 @@ test_whatsapp.py — pruebas de jarvis_whatsapp.py SIN Node, SIN WhatsApp y SIN 
 Corre en cualquier sitio:
     python3 test_whatsapp.py -v
 """
+import collections
 import importlib
 import json
 import os
@@ -14,6 +15,7 @@ import re
 import sys
 import tempfile
 import threading
+import types
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -231,6 +233,64 @@ class TestEnvio(BaseWa):
         PuenteFalso.modo = "sin_sesion"
         r = wa.intentar("whatsapp estado")
         self.assertIn("QR", r)
+
+
+# ─────────────────────────────────────────────────────────────
+# Hablarse a sí mismo: enviar a «yo» + escucha del chat propio
+# ─────────────────────────────────────────────────────────────
+
+class TestYoYEscucha(BaseWa):
+    def test_enviar_a_yo_usa_el_wid_del_puente(self):
+        r = wa.enviar("yo", "nota mental")
+        self.assertIn("Enviado", r)
+
+    def test_es_yo_variantes(self):
+        self.assertTrue(wa._es_yo("yo"))
+        self.assertTrue(wa._es_yo("  Yo "))
+        self.assertTrue(wa._es_yo("mismo"))
+        self.assertFalse(wa._es_yo("mama"))
+
+    def test_mi_numero_vacio_si_puente_muerto(self):
+        os.environ["JARVIS_WA_BRIDGE_URL"] = "http://127.0.0.1:1"
+        importlib.reload(wa)
+        self.assertEqual(wa._mi_numero(), "")
+        self.assertIn("No sé todavía", wa.enviar("yo", "hola"))
+
+    def _fake_cb(self, resp):
+        return types.SimpleNamespace(intentar=lambda t: resp)
+
+    def test_responder_prioriza_comandos_whatsapp(self):
+        r = wa.responder_como_jarvis("mis contactos", cb=self._fake_cb("NO"))
+        self.assertIn("mama", r)
+
+    def test_responder_consulta_del_aula(self):
+        r = wa.responder_como_jarvis("mis notas", cb=self._fake_cb("NOTAS-FAKE"))
+        self.assertEqual(r, "NOTAS-FAKE")
+
+    def test_responder_por_defecto_ayuda(self):
+        r = wa.responder_como_jarvis("hazme un sandwich", cb=self._fake_cb(None))
+        self.assertEqual(r, wa.RESPUESTA_POR_DEFECTO)
+
+    def test_procesar_responde_una_sola_vez_por_id(self):
+        vistos = collections.deque(maxlen=50)
+        enviados = []
+        cb = types.SimpleNamespace(
+            intentar=lambda t: "NOTAS-FAKE" if "notas" in t else None)
+        ts = wa.procesar_mensajes(
+            [{"id": "A", "ts": 100, "texto": "mis notas"},
+             {"id": "A", "ts": 100, "texto": "mis notas"},   # duplicado
+             {"id": "B", "ts": 105, "texto": "hola"},
+             {"id": "C", "ts": 110, "texto": ""}],           # sin texto
+            vistos, cb=cb, enviar_fn=enviados.append)
+        self.assertEqual(ts, 110)
+        self.assertEqual(enviados, ["NOTAS-FAKE", wa.RESPUESTA_POR_DEFECTO])
+
+    def test_procesar_lista_vacia(self):
+        enviados = []
+        ts = wa.procesar_mensajes([], collections.deque(),
+                                  enviar_fn=enviados.append)
+        self.assertEqual(ts, 0)
+        self.assertEqual(enviados, [])
 
 
 if __name__ == "__main__":
