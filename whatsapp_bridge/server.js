@@ -213,6 +213,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+server.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE') {
+    log(`ERROR: el puerto ${PUERTO} ya está ocupado — ya hay OTRO puente corriendo.`);
+    log('  → Ve a esa otra terminal y púlsale Ctrl+C, o mátalo con:');
+    log('      pkill -f "node server.js"');
+    log('  → Después vuelve a lanzar ./iniciar.sh (no hace falta QR de nuevo).');
+    process.exit(1);
+  }
+  throw e;
+});
+
 server.listen(PUERTO, HOST, () => {
   log(`Puente WhatsApp en http://${HOST}:${PUERTO}`);
   log(`Chrome/Chromium: ${CHROME || '(puppeteer usará el suyo)'}`);
