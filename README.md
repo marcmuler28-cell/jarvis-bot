@@ -41,6 +41,22 @@ JARVIS_DB_PASSWORD=tu_password_mysql
 JARVIS_DB_NAME=jarvisbot
 ```
 
+## Aula virtual (Blackboard Ultra / Mi Cibertec) — `cibertec_bridge.py`
+
+Verbos locales que corren `consultar.py` (Playwright + APIs `/learn/api/v1`)
+con la sesión de `blackboard_state.json`:
+
+| Le dices al chat… | Jarvis… |
+|---|---|
+| «mis notas», «calificaciones» | promedio por curso + promedio general |
+| «mis cursos» | matriculados activos |
+| «mensajes del aula» | sin leer por curso |
+| «mis evaluaciones», «calendario del aula» | eventos próximos |
+
+Reglas respetadas: si la sesión caducó **no se loguea solo** (el SMS exige
+humano) → te remite a `python login_unificado.py`; `blackboard_state.json` y
+`sms_code.txt` están en `.gitignore` y **NUNCA** van al repo.
+
 ## Arranque
 
 ```bash

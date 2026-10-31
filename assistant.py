@@ -41,6 +41,13 @@ except Exception as _e_v3:
     print(f"[VENTANAS_V3] jarvis_skills_bridge no disponible: {_e_v3}")
     _skills_v3 = None
 
+# [CIBERTEC_V3] Aula virtual (Blackboard Ultra) — notas/cursos/mensajes/calendario
+try:
+    import cibertec_bridge as _cibertec_v3
+except Exception as _e_cib:
+    print(f"[CIBERTEC_V3] cibertec_bridge no disponible: {_e_cib}")
+    _cibertec_v3 = None
+
 class FileChangeHandler(FileSystemEventHandler):
     def __init__(self, tools):
         self.tools = tools
@@ -297,6 +304,8 @@ Pensamiento:"""
                 })
             if _skills_v3:
                 self.tools.actions.update(_skills_v3.registrar())
+            if _cibertec_v3:
+                self.tools.actions.update(_cibertec_v3.registrar())
         except Exception as _e_v3:
             print(f"[VENTANAS_V3] no pude registrar herramientas extra: {_e_v3}")
         self.memory = MemoryManager()
@@ -699,6 +708,16 @@ Pensamiento:"""
                                             [{"action": "jarvis_skill", "args": [text],
                                               "result": respuesta_skill}])
                 return respuesta_skill, []
+
+        # --- [CIBERTEC_V3] Aula virtual: notas/cursos/mensajes/calendario ---
+        # (corre consultar.py con la sesión guardada; si caducó, pide SMS humano)
+        if _cibertec_v3:
+            respuesta_cib = _cibertec_v3.intentar(text)
+            if respuesta_cib is not None:
+                self.memory.add_interaction(user_input, respuesta_cib,
+                                            [{"action": "cibertec", "args": [text],
+                                              "result": respuesta_cib}])
+                return respuesta_cib, []
 
         # --- Spotify: Reproducir playlist por nombre ---
         if SPOTIFY_AVAILABLE:
