@@ -157,9 +157,21 @@ async function enviar(to, message) {
   if (!wid) {
     throw httpError(404, `el número +${digits} no tiene WhatsApp registrado`);
   }
-  const enviado = await client.sendMessage(wid._serialized, String(message));
-  log('📤 enviado a', wid._serialized);
-  return { ok: true, chatId: wid._serialized, id: enviado.id._serialized };
+  try {
+    // getChatById crea el chat si hace falta. Con client.sendMessage a TU
+    // PROPIO número el resultado llega undefined y reventaba con
+    // "Cannot read properties of undefined (reading 'id')".
+    const chat = await client.getChatById(wid._serialized);
+    const enviado = await chat.sendMessage(String(message));
+    if (!enviado || !enviado.id) {
+      throw new Error('WhatsApp no devolvió confirmación del envío');
+    }
+    log('📤 enviado a', wid._serialized);
+    return { ok: true, chatId: wid._serialized, id: enviado.id._serialized };
+  } catch (e) {
+    if (e && e.status) throw e; // ya es un error HTTP nuestro
+    throw httpError(502, `WhatsApp rechazó el envío a +${digits}: ${e && e.message}`);
+  }
 }
 
 const server = http.createServer(async (req, res) => {
