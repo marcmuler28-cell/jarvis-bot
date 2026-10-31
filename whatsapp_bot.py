@@ -1,5 +1,6 @@
 import requests
 import json
+import os
 from flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 from database import MemoryManager
@@ -10,14 +11,20 @@ app = Flask(__name__)
 db = MemoryManager()
 skill = BlackboardSkill(db_manager=db)
 
-PHONE_NUMBER_ID = "1109172922279619"
-ACCESS_TOKEN = "EAAZAYB36enDgBRud9ZAr5K9CquO2AHULELlh5YaRmKG8NxmURJPldCWGEqPrsiSPsMDQSLtbLBN9iR35I13YejKY9Bh0TAjmLHKAkHw21ZA0l4ZBI8wic9iiWKBSSplDgOMxro5ZAY9wD4LlhcqxZCtNGtg3g9zSkU7U0imdYUjExb0fyCOCeS7jh2BcUZCgEOp4puuVoXe9zeWkiyW6bK6cT1Elm8ZAiPYL44tRhuZC8XcIbCH3SGYUfoVp7SeBCOADVm6AITRlfgQdZAcfdQ1d7ZBPNfs"
-VERIFY_TOKEN = "jarvis_token_secreto_2025"
+# [SEGURIDAD] Credenciales por .env (JARVIS_WA_PHONE_ID / JARVIS_WA_TOKEN /
+# JARVIS_WA_VERIFY). El token que estaba aqui hardcodeado quedo EXPUESTO en
+# el repo publico: revocalo en developers.facebook.com y no lo subas nunca.
+PHONE_NUMBER_ID = os.environ.get("JARVIS_WA_PHONE_ID", "")
+ACCESS_TOKEN = os.environ.get("JARVIS_WA_TOKEN", "")
+VERIFY_TOKEN = os.environ.get("JARVIS_WA_VERIFY", "jarvis-token-local")
 OLLAMA_MODEL = "qwen2.5-coder:7b"
 OLLAMA_URL = "http://localhost:11434/api/generate"
 
 
 def send_whatsapp_message(to, text):
+    if not (ACCESS_TOKEN and PHONE_NUMBER_ID):
+        print("[WA] Cloud API sin credenciales (.env: JARVIS_WA_TOKEN/JARVIS_WA_PHONE_ID); omito envio.")
+        return None
     url = f"https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {ACCESS_TOKEN}",

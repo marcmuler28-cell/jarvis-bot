@@ -30,3 +30,8 @@ node_modules/
 .jarvis/
 blackboard_state.json
 sms_code.txt
+
+# WhatsApp local (sesión = tu teléfono; NUNCA subir)
+whatsapp_bridge/.wwebjs_auth/
+whatsapp_bridge/.wwebjs_cache/
+whatsapp_bridge/wa_qr.png

@@ -48,6 +48,13 @@ except Exception as _e_cib:
     print(f"[CIBERTEC_V3] cibertec_bridge no disponible: {_e_cib}")
     _cibertec_v3 = None
 
+# [WHATSAPP_V3] WhatsApp con tu propio número (puente local whatsapp-web.js)
+try:
+    import jarvis_whatsapp as _whatsapp_v3
+except Exception as _e_wa:
+    print(f"[WHATSAPP_V3] jarvis_whatsapp no disponible: {_e_wa}")
+    _whatsapp_v3 = None
+
 class FileChangeHandler(FileSystemEventHandler):
     def __init__(self, tools):
         self.tools = tools
@@ -306,6 +313,8 @@ Pensamiento:"""
                 self.tools.actions.update(_skills_v3.registrar())
             if _cibertec_v3:
                 self.tools.actions.update(_cibertec_v3.registrar())
+            if _whatsapp_v3:
+                self.tools.actions.update(_whatsapp_v3.registrar())
         except Exception as _e_v3:
             print(f"[VENTANAS_V3] no pude registrar herramientas extra: {_e_v3}")
         self.memory = MemoryManager()
@@ -682,6 +691,9 @@ Pensamiento:"""
                 "cerrar apps como Spotify o el panel de Quickshell, "
                 "mostrar métricas de programas y procesos, "
                 "buscar en Google, crear recordatorios, "
+                "enviar WhatsApp con tu número (por ejemplo: 'manda un whatsapp a mamá "
+                "diciendo que ya llegué'), "
+                "consultar tus notas y cursos de Cibertec, organizar Descargas y manejar ventanas, "
                 "y también apagar o reiniciar el equipo si dices 'apágate' o 'reinicia el equipo'."
             )
             self.memory.add_interaction(user_input, response, [{"action": "help", "args": [], "result": response}])
@@ -718,6 +730,16 @@ Pensamiento:"""
                                             [{"action": "cibertec", "args": [text],
                                               "result": respuesta_cib}])
                 return respuesta_cib, []
+
+        # --- [WHATSAPP_V3] Enviar mensajes con tu propio número ---
+        # «manda un whatsapp a mama diciendo que ya llegue», «wsp a luis que mañana hay examen»
+        if _whatsapp_v3:
+            respuesta_wa = _whatsapp_v3.intentar(text)
+            if respuesta_wa is not None:
+                self.memory.add_interaction(user_input, respuesta_wa,
+                                            [{"action": "whatsapp", "args": [text],
+                                              "result": respuesta_wa}])
+                return respuesta_wa, []
 
         # --- Spotify: Reproducir playlist por nombre ---
         if SPOTIFY_AVAILABLE:

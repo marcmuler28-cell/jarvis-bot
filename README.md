@@ -57,9 +57,43 @@ Reglas respetadas: si la sesión caducó **no se loguea solo** (el SMS exige
 humano) → te remite a `python login_unificado.py`; `blackboard_state.json` y
 `sms_code.txt` están en `.gitignore` y **NUNCA** van al repo.
 
+## WhatsApp con tu propio número — `jarvis_whatsapp.py` + `whatsapp_bridge/`
+
+Sin API de Meta, sin tokens de Facebook, sin webhook: un puente local Node
+(`whatsapp-web.js` + LocalAuth) abre **tu propia sesión de WhatsApp** y el
+cerebro le habla por HTTP en `127.0.0.1:5015`.
+
+| Le dices al chat… | Jarvis… |
+|---|---|
+| «manda un whatsapp a mamá diciendo que ya llegué» | envía con tu número (el mensaje conserva tildes y ñ) |
+| «envíale un wsp a luis que mañana hay examen» | ídem, separador «que/dile/k» |
+| «whatsapp a mama: no te preocupes» | ídem, separador «:» |
+| «estado de whatsapp» | ¿el puente está conectado? |
+| «mis contactos» | lista `~/.jarvis/contactos.json` |
+| «guarda contacto papa +51987000123» | añade el apodo a la agenda |
+
+Instalación y primer QR: ver `whatsapp_bridge/README.md`. Resumen:
+
+```bash
+cd ~/Proyectos/JarvisBot/whatsapp_bridge
+./instalar.sh          # npm install (usa el chromium del sistema)
+./iniciar.sh           # primera vez: imprime token + QR para vincular
+```
+
+- Agenda: `~/.jarvis/contactos.json` (apodo → número con código de país).
+- `server.js` escucha SOLO en `127.0.0.1` y exige `X-Jarvis-Token`
+  (`JARVIS_WA_BRIDGE_TOKEN` en el `.env` y en el entorno del puente).
+- La sesión queda en `whatsapp_bridge/.wwebjs_auth/` → en `.gitignore`,
+  **equivale a tu teléfono: nunca subirla ni compartirla**.
+- `whatsapp_bot.py` (Cloud API vieja) quedó saneado: sus credenciales ahora
+  van por `.env` (`JARVIS_WA_PHONE_ID` / `JARVIS_WA_TOKEN` / `JARVIS_WA_VERIFY`).
+  El token que estaba hardcodeado en el repo público hay que **revocarlo** en
+  developers.facebook.com.
+
 ## Arranque
 
 ```bash
 python3 api_gateway.py          # gateway en 127.0.0.1:5001 (solo local, nunca exponer)
 python3 test_ventanas.py        # suite de pruebas de ventanas + skills
+python3 test_whatsapp.py        # suite de WhatsApp (sin Node, sin red)
 ```

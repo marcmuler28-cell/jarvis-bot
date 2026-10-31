@@ -1,0 +1,17 @@
+{
+  "name": "jarvis-whatsapp-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Puente local: cerebro Python (JarvisBot) -> WhatsApp con TU PROPIO numero, via whatsapp-web.js + LocalAuth. Sin API de Meta, sin tokens de Facebook.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "whatsapp-web.js": "^1.26.0"
+  }
+}
