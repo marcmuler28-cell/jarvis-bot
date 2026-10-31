@@ -55,8 +55,69 @@ class BlackboardSkill:
         self._ensure_tables()
 
     def _ensure_tables(self):
-        # Tablas ya creadas por DatabaseManager, aquí no hacemos nada
-        pass
+        """Crea las tablas bb_* si no existen (MySQL).
+
+        Antes esto era un no-op que asumía que DatabaseManager las creaba,
+        y «mis notas» reventaba con 1146 (42S02): Table 'jarvisbot.bb_grades'
+        doesn't exist. Los tipos siguen EXACTAMENTE lo que insertan los
+        métodos _fetch_* (fecha es texto porque Blackboard da "hace 2 h").
+        """
+        ddl = [
+            """
+            CREATE TABLE IF NOT EXISTS bb_courses (
+                id VARCHAR(64) PRIMARY KEY,
+                name VARCHAR(255),
+                last_updated DATETIME
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS bb_messages (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                course_id VARCHAR(64),
+                course_name VARCHAR(255),
+                remitente VARCHAR(255),
+                fecha VARCHAR(64),
+                destinatarios TEXT,
+                cuerpo TEXT,
+                unread TINYINT DEFAULT 0,
+                last_updated DATETIME,
+                INDEX idx_bb_msg_curso (course_name)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS bb_schedules (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                course_name VARCHAR(255),
+                schedule_date VARCHAR(64),
+                day_of_week VARCHAR(20),
+                start_time VARCHAR(20),
+                end_time VARCHAR(20),
+                classroom VARCHAR(255),
+                status VARCHAR(64),
+                last_updated DATETIME,
+                INDEX idx_bb_sch_curso (course_name)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS bb_grades (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                course_name VARCHAR(255),
+                evaluation_type VARCHAR(20),
+                evaluation_name VARCHAR(255),
+                weight FLOAT DEFAULT 0,
+                grade FLOAT DEFAULT 0,
+                last_updated DATETIME,
+                INDEX idx_bb_gr_curso (course_name)
+            )
+            """,
+        ]
+        try:
+            for sql in ddl:
+                self.db.execute(sql)
+            logger.info("Tablas bb_* verificadas/creadas correctamente.")
+        except Exception as e:
+            # Si MySQL no está disponible, no tumbamos el cerebro: solo avisamos.
+            logger.warning(f"No pude crear/verificar las tablas bb_*: {e}")
 
     # ─── LOGIN ────────────────────────────────────────────
     def login(self, force_manual=False):
@@ -328,6 +389,12 @@ class BlackboardSkill:
         # Limpiar tablas antes de insertar nuevos datos
         self.db.execute('DELETE FROM bb_grades')
         self.db.execute('DELETE FROM bb_schedules')
+        self.db.execute('DELETE FROM bb_courses')
+        # Catálogo de cursos del ciclo (antes «mis cursos» no tenía fuente)
+        for i, (course_name, _href) in enumerate(cursos):
+            self.db.execute(
+                'INSERT INTO bb_courses (id, name, last_updated) VALUES (?, ?, ?)',
+                (f"c{i:02d}", course_name, datetime.now()))
 
         for course_name, href in cursos:
             logger.info(f"Navegando a detalle de {course_name}: {href}")

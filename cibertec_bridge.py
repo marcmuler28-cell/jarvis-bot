@@ -1,33 +1,65 @@
 #!/usr/bin/env python3
-"""cibertec_bridge.py v1 — Aula virtual (Blackboard Ultra) + Mi Cibertec dentro del cerebro.
+"""cibertec_bridge.py v2 — Aula Cibertec/Blackboard dentro del cerebro (via MySQL).
 
-Ejecuta ./consultar.py (Playwright + APIs /learn/api/v1 del aula) con la sesión
-de ./blackboard_state.json y devuelve respuestas CORTAS para el chat.
+v1 dependia de un `consultar.py` que nunca existio; v2 lee las tablas bb_*
+de MySQL (bb_grades, bb_courses, bb_messages, bb_schedules) que llena el
+sincronizador `skills/blackboard_skill.py` con Playwright. Es la MISMA base
+de datos del resto del Jarvis, asi que:
 
-Verbos del fast-path (a través de intentar()):
-  «mis notas» «ver notas» «calificaciones»     -> notas por curso + promedios
-  «mis cursos» «que cursos llevo»              -> matriculados este ciclo
-  «mensajes del aula» «bandeja cibertec»       -> sin leer por curso
-  «calendario del aula» «mis evaluaciones»     -> eventos próximos
+  - «mis notas» responde al instante, sin abrir navegador.
+  - Si no hay datos sincronizados todavia, te dice como sincronizarlos
+    («abre cibertec») en vez de reventar con 1146 (42S02).
+  - Si MySQL no esta corriendo, avisa y el cerebro sigue vivo.
 
-Regla 2 del proyecto: si la sesión caducó, NO se loguea solo (el SMS exige
-humano) -> remite a `python login_unificado.py` en terminal interactiva.
+Verbos del fast-path (a traves de intentar()):
+  «mis notas» «ver notas» «calificaciones»   -> notas por curso + promedios
+  «mis cursos» «que cursos llevo»            -> matriculados este ciclo
+  «mensajes del aula» «bandeja cibertec»     -> sin leer por curso
+  «calendario del aula» «mis evaluaciones»   -> proximas sesiones/horarios
 
-Solo stdlib. Este módulo JAMÁS lee ni imprime blackboard_state.json (solo lo
-recibe consultar.py vía Playwright) y NUNCA debe subirse a un repo.
+Regla 2 del proyecto: nada de aqui se loguea solo (el SMS exige humano).
+Para refrescar los datos: «abre cibertec» con la sesion vigente, o
+`python3 login_unificado.py` en terminal y luego «abre cibertec».
+
+Importa solo stdlib al cargar; DatabaseManager (mysql) se abre de forma
+perezoza y es inyectable (set_db) para los tests.
 """
-import json
-import os
+import datetime as _dt
 import re
-import subprocess
-import sys
 import unicodedata
 
-AQUI = os.path.dirname(os.path.abspath(__file__))
-CONSULTAR = os.environ.get("JARVIS_CONSULTAR", os.path.join(AQUI, "consultar.py"))
+# ─────────────────────────────────────────────────────────────
+# Acceso a datos (perezozo + inyectable para tests)
+# ─────────────────────────────────────────────────────────────
 
-MSG_SESION = ("🔒 Tu sesión del aula caducó. En una terminal del proyecto JarvisBot: "
-              "`python login_unificado.py` (te pedirá el código SMS) y me vuelves a preguntar.")
+_DB = None
+
+
+def set_db(db):
+    """Inyecta un gestor de BD (para tests). None vuelve al modo automatico."""
+    global _DB
+    _DB = db
+
+
+def _db():
+    """Devuelve el gestor de BD o None si no hay forma de conectar."""
+    global _DB
+    if _DB is not None:
+        return _DB
+    try:
+        from database import DatabaseManager  # se resuelve al primer uso
+        _DB = DatabaseManager()
+        return _DB
+    except Exception:
+        return None
+
+
+MSG_SIN_DB = ("🗄️ No pude hablar con la base de datos local (MySQL). "
+              "Revísala con `systemctl status mysqld` y me vuelves a preguntar.")
+
+MSG_SIN_DATOS = ("🗄️ Todavía no sincronicé datos del aula. Dime «abre cibertec» "
+                 "(con la sesión vigente); si te pide código SMS, primero corre "
+                 "`python3 login_unificado.py` en una terminal y reintenta.")
 
 
 def _norm(texto: str) -> str:
@@ -39,166 +71,119 @@ def _norm(texto: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# Ejecución de consultar.py
-# ─────────────────────────────────────────────────────────────
-
-def _disponible():
-    return os.path.isfile(CONSULTAR)
-
-
-def _correr(consulta, extra=(), timeout=120):
-    """Corre consultar.py en el proyecto; devuelve (json_dict|None, error_str|None)."""
-    if not _disponible():
-        return None, "No encuentro `consultar.py` en la raíz del proyecto JarvisBot."
-    try:
-        r = subprocess.run(
-            [sys.executable, CONSULTAR, consulta, *extra],
-            capture_output=True, text=True, timeout=timeout,
-            cwd=AQUI, stdin=subprocess.DEVNULL)
-    except subprocess.TimeoutExpired:
-        return None, f"El aula tardó más de {timeout}s — prueba otra vez en un rato."
-    except Exception as e:
-        return None, f"No pude ejecutar consultar.py: {e}"
-
-    out = (r.stdout or "")
-    if r.returncode == 2 or "SESIÓN EXPIRADA" in out:
-        return None, MSG_SESION
-    # el bloque JSON va al final tras la línea "--- JSON ---"
-    if "--- JSON ---" in out:
-        blob = out.rsplit("--- JSON ---", 1)[1].strip()
-        try:
-            return json.loads(blob), None
-        except Exception:
-            pass
-    err = (r.stderr or "").strip().splitlines()
-    return None, (err[-1][:160] if err else "El aula respondió vacío.")
-
-
-# ─────────────────────────────────────────────────────────────
 # Formateo (respuestas cortas para el chat)
 # ─────────────────────────────────────────────────────────────
-
-_RC_CODIGO = re.compile(r"^[A-Z]{3,5}\d{4,5}\s+")
-_RC_FILA_TOTAL = re.compile(
-    r"^(total|calificaci[oó]n general|total ponderado|promedio|nota final)\b", re.I)
-
-
-def _curso_corto(nombre):
-    return _RC_CODIGO.sub("", nombre or "").strip() or (nombre or "?")
-
 
 def _a_float(x):
     try:
         return float(x)
     except (TypeError, ValueError):
+        return 0.0
+
+
+def fmt_notas(filas):
+    """filas: (course_name, evaluation_type, evaluation_name, weight, grade).
+
+    Promedio PONDERADO cuando las evaluaciones traen peso (T1 30%, T2 30%,
+    EF 40%); si no hay pesos, promedio simple. Escala vigesimal /20.
+    Devuelve None si no hay filas (señal de «sin sincronizar»).
+    """
+    if not filas:
         return None
+    por_curso = {}
+    for curso, tipo, nombre, peso, nota in filas:
+        por_curso.setdefault(curso or "?", []).append(
+            ((tipo or "").strip(), _a_float(peso), _a_float(nota)))
 
-
-def fmt_notas(datos):
-    notas = datos.get("notas") or []
-    nombres = {c.get("course_id"): c.get("nombre", "?") for c in (datos.get("cursos") or [])}
-    por_curso, orden = {}, []
-    for n in notas:
-        cid = n.get("course_id")
-        if cid not in por_curso:
-            por_curso[cid] = []
-            orden.append(cid)
-        por_curso[cid].append(n)
-
-    lineas = []
-    promedios = []
-    for cid in orden:
-        filas = [f for f in por_curso[cid]
-                 if f.get("item") and not _RC_FILA_TOTAL.match(f.get("item", ""))]
-        if not filas:
+    lineas, promedios = [], []
+    for curso, evs in por_curso.items():
+        calificadas = [(t, w, g) for t, w, g in evs if g > 0]
+        if not calificadas:
+            lineas.append(f"• {curso}: sin notas aún ({len(evs)} evaluaciones registradas)")
             continue
-        nombre = _curso_corto(nombres.get(cid) or "")
-        calif = []
-        for f in filas:
-            pt, pos = _a_float(f.get("puntaje")), _a_float(f.get("puntos_posibles"))
-            if pt is None or not pos:
-                continue
-            calif.append(pt / pos * 20.0)
-        if calif:
-            prom = sum(calif) / len(calif)
-            promedios.append(prom)
-            lineas.append(f"• {nombre}: promedio {prom:.1f}/20 ({len(calif)} notas)")
-        sin_calificar = [f for f in filas if f.get("status") != "GRADED"]
-        if sin_calificar:
-            lineas.append(f"   ↳ {len(sin_calificar)} sin calificar (última: "
-                          f"{sin_calificar[-1].get('item', '')[:40]})")
-    if not lineas:
-        return "No encontré notas registradas en el aula."
-    resumen = "📚 NOTAS DEL AULA\n" + "\n".join(lineas[:14])
+        peso_total = sum(w for _, w, _ in calificadas)
+        if peso_total > 0:
+            prom = sum(g * w for _, w, g in calificadas) / peso_total
+        else:
+            prom = sum(g for _, _, g in calificadas) / len(calificadas)
+        promedios.append(prom)
+        detalle = ", ".join(f"{t} {g:g}" for t, _, g in calificadas if t)
+        linea = f"• {curso}: promedio {prom:.1f}/20"
+        if detalle:
+            linea += f"  ({detalle})"
+        lineas.append(linea)
+
+    if not promedios:
+        return "📚 El aula todavía no tiene notas calificadas (solo evaluaciones registradas)."
+    texto = "📚 NOTAS DEL AULA\n" + "\n".join(lineas[:14])
     if len(lineas) > 14:
-        resumen += f"\n… y {len(lineas) - 14} más (detalle en jarvisbot.db)"
-    if promedios:
-        resumen += f"\n🎯 Promedio general: {sum(promedios) / len(promedios):.1f}/20"
-    return resumen
-
-
-def fmt_cursos(datos):
-    cursos = [c for c in (datos.get("cursos") or [])]
-    if not cursos:
-        return "No vi cursos matriculados en el aula."
-    vivos = [c for c in cursos if c.get("disponible")]
-    lineas = [f"{i}. {_curso_corto(c.get('nombre', '?'))}"
-              for i, c in enumerate(vivos, 1)]
-    extra = len(cursos) - len(vivos)
-    texto = f"🎓 CURSOS ({len(vivos)} activos)\n" + "\n".join(lineas[:12])
-    if extra:
-        texto += f"\n(+{extra} de ciclos pasados)"
+        texto += f"\n… y {len(lineas) - 14} cursos más"
+    texto += f"\n🎯 Promedio general: {sum(promedios) / len(promedios):.1f}/20"
     return texto
 
 
-def fmt_mensajes(datos):
-    convs = datos.get("conversaciones") or []
-    resumen = datos.get("resumen_mensajes") or []
-    nombres = {c.get("course_id"): c.get("nombre", "?") for c in (datos.get("cursos") or [])}
-    if not convs and not resumen:
-        return "No vi conversaciones en el aula."
-    filas = convs if convs else resumen
-    # agrupar por curso (el aula separa por conversación)
+def fmt_cursos(nombres):
+    if not nombres:
+        return None
+    lineas = [f"{i}. {n}" for i, n in enumerate(nombres, 1)]
+    return f"🎓 CURSOS ({len(nombres)})\n" + "\n".join(lineas[:12])
+
+
+def fmt_mensajes(filas):
+    """filas: (course_name, remitente, fecha, cuerpo, unread)."""
+    if not filas:
+        return None
     agg = {}
-    for c in filas:
-        cid = c.get("course_id") or c.get("curso") or "?"
-        a = agg.setdefault(cid, {"sl": 0, "tot": 0})
-        a["sl"] += c.get("sin_leer") or 0
-        a["tot"] += c.get("total") or 0
+    for curso, _remitente, _fecha, _cuerpo, unread in filas:
+        a = agg.setdefault(curso or "?", {"sl": 0, "tot": 0})
+        a["tot"] += 1
+        if unread:
+            a["sl"] += 1
     orden = sorted(agg.items(), key=lambda kv: (-kv[1]["sl"], -kv[1]["tot"]))
-    lineas = []
-    for cid, a in orden[:10]:
-        nombre = _curso_corto(nombres.get(cid) or (cid if cid != "?" else "?"))
-        marca = "🔔" if a["sl"] else "✅"
-        lineas.append(f"{marca} {nombre}: {a['sl']} sin leer de {a['tot']}")
-    total_sl = sum(a["sl"] for _, a in agg.items())
+    lineas = [f"{'🔔' if a['sl'] else '✅'} {c}: {a['sl']} sin leer de {a['tot']}"
+              for c, a in orden[:10]]
+    total_sl = sum(a["sl"] for a in agg.values())
     return f"✉️ AULA — {total_sl} mensajes sin leer\n" + "\n".join(lineas)
 
 
 _MESES = ("ene feb mar abr may jun jul ago sep oct nov dic").split()
+_RE_FECHA = re.compile(r"^(\d{1,2})/(\d{1,2})$")
 
 
-def fmt_calendario(datos):
-    evs = datos.get("calendario") or []
-    if not evs:
-        return "No vi eventos en el calendario del aula."
-    evs = sorted(evs, key=lambda e: e.get("inicio") or "")
-    lineas, vistos = [], set()
-    for e in evs:
-        clave = (e.get("titulo"), e.get("inicio"))
-        if clave in vistos:
-            continue
-        vistos.add(clave)
-        ini = (e.get("inicio") or "")[:16].replace("T", " ")
-        dia = ini[:10]
-        try:
-            y, m, d = dia.split("-")
-            bonito = f"{d} {_MESES[int(m) - 1]}"
-        except Exception:
-            bonito = dia
-        hora = ini[11:16] if len(ini) >= 16 else ""
-        lineas.append(f"• {bonito}{' ' + hora if hora else ''} — {e.get('titulo', '?')}")
-    return "🗓️ CALENDARIO DEL AULA\n" + "\n".join(lineas[:10])
+def fmt_calendario(filas):
+    """filas: (course_name, schedule_date, day_of_week, start_time, end_time, status).
+
+    schedule_date viene como «22/05» (sin año): las fechas que ya pasaron
+    este año se asumen del próximo ciclo y quedan al final.
+    """
+    if not filas:
+        return None
+    hoy = _dt.date.today()
+
+    def clave(fecha):
+        m = _RE_FECHA.match((fecha or "").strip())
+        if not m:
+            return (2, 99, 99)  # sin fecha parseable -> al final
+        dia, mes = int(m.group(1)), int(m.group(2))
+        pasado = 1 if (mes, dia) < (hoy.month, hoy.day) else 0
+        return (pasado, mes, dia)
+
+    lineas = []
+    for curso, fecha, dia_sem, inicio, fin, estado in sorted(
+            filas, key=lambda f: clave(f[1])):
+        fecha_ok = bool(_RE_FECHA.match((fecha or "").strip()))
+        cuando = " ".join(x for x in ((dia_sem or "").strip(), (fecha or "").strip()) if x)
+        hora = f"{inicio}-{fin}" if (inicio or fin) else ""
+        trozos = [f"• {cuando or '(sin fecha)'}"]
+        if not fecha_ok:
+            trozos.append("(sin fecha)")
+        if hora:
+            trozos.append(hora)
+        trozos.append(curso or "?")
+        if estado:
+            trozos.append(f"({estado})")
+        lineas.append(" ".join(trozos))
+    return "🗓️ PRÓXIMAS SESIONES DEL AULA\n" + "\n".join(lineas[:10])
 
 
 # ─────────────────────────────────────────────────────────────
@@ -213,36 +198,87 @@ _RE_CALENDARIO = re.compile(
     r"\b(calendario|agenda|evaluaciones?|examenes?|practicas?)\b"
     r".*(aula|cibertec|blackboard|universidad|este ciclo)\b|\b(calendario|evaluaciones|examenes)\b")
 
+# Palabras que marcan que «notas» NO es del aula (bloc de notas, anotar...)
+_GUARDAS_NOTAS = ("bloc", "blog", "block", "anota")
+
+_STOP_CURSO = {"aula", "cibertec", "blackboard", "universidad", "ciclo",
+               "este ciclo", "el aula", "mi", "mis", "aula virtual"}
+
+
+def _curso_hint(t):
+    """«notas de desarrollo web» -> 'desarrollo web' (o None si no aplica)."""
+    m = re.search(r"\bde\s+([\w ]{3,60})$", t)
+    if not m:
+        return None
+    candidato = m.group(1).strip()
+    return None if candidato in _STOP_CURSO else candidato
+
+
+def _q(db, sql, params=None):
+    return db.query(sql, params) if params else db.query(sql)
+
 
 def intentar(texto):
     """Devuelve la respuesta del aula si la frase es del dominio, o None."""
     t = _norm(texto)
     if not t:
         return None
+    if any(g in t for g in _GUARDAS_NOTAS):
+        return None  # «abre el bloc de notas», «anota que...» -> no son del aula
 
-    consulta, formateador, timeout = None, None, 120
+    hint = _curso_hint(t)
+    db = _db()
+
     if _RE_NOTAS.search(t):
-        consulta, formateador, timeout = "notas", fmt_notas, 240
-    elif _RE_MENSAJES.search(t):
-        consulta, formateador, timeout = "mensajes", fmt_mensajes, 150
-    elif _RE_CALENDARIO.search(t):
-        consulta, formateador, timeout = "calendario", fmt_calendario, 120
-    elif _RE_CURSOS.search(t) and ("cibertec" in t or "aula" in t or "blackboard" in t
-                                   or "universidad" in t or t.startswith(("mis cursos", "cursos", "que cursos"))):
-        consulta, formateador, timeout = "cursos", fmt_cursos, 120
+        if db is None:
+            return MSG_SIN_DB
+        try:
+            if hint:
+                filas = _q(db, "SELECT course_name, evaluation_type, evaluation_name, "
+                               "weight, grade FROM bb_grades WHERE course_name LIKE ?",
+                           (f"%{hint}%",))
+            else:
+                filas = _q(db, "SELECT course_name, evaluation_type, evaluation_name, "
+                               "weight, grade FROM bb_grades")
+            return fmt_notas(filas) or MSG_SIN_DATOS
+        except Exception:
+            return MSG_SIN_DB
 
-    if consulta is None:
-        return None
+    if _RE_MENSAJES.search(t):
+        if db is None:
+            return MSG_SIN_DB
+        try:
+            filas = _q(db, "SELECT course_name, remitente, fecha, cuerpo, unread FROM bb_messages")
+            return fmt_mensajes(filas) or MSG_SIN_DATOS
+        except Exception:
+            return MSG_SIN_DB
 
-    datos, error = _correr(consulta, extra=["--json"], timeout=timeout)
-    if error:
-        return error
-    if datos is None:
-        return "El aula respondió algo que no entendí (mira la terminal del gateway)."
-    try:
-        return formateador(datos)
-    except Exception as e:
-        return f"Extraje los datos del aula pero falló el resumen: {e}"
+    if _RE_CALENDARIO.search(t):
+        if db is None:
+            return MSG_SIN_DB
+        try:
+            filas = _q(db, "SELECT course_name, schedule_date, day_of_week, "
+                           "start_time, end_time, status FROM bb_schedules")
+            return fmt_calendario(filas) or MSG_SIN_DATOS
+        except Exception:
+            return MSG_SIN_DB
+
+    if _RE_CURSOS.search(t) and ("cibertec" in t or "aula" in t or "blackboard" in t
+                                 or "universidad" in t
+                                 or t.startswith(("mis cursos", "cursos", "que cursos"))):
+        if db is None:
+            return MSG_SIN_DB
+        try:
+            nombres = [r[0] for r in _q(db, "SELECT name FROM bb_courses ORDER BY name") if r[0]]
+            if not nombres:  # respaldo: derivar cursos de notas y horarios
+                vistos = [r[0] for r in _q(db, "SELECT DISTINCT course_name FROM bb_grades")]
+                vistos += [r[0] for r in _q(db, "SELECT DISTINCT course_name FROM bb_schedules")]
+                nombres = sorted({v for v in vistos if v})
+            return fmt_cursos(nombres) or MSG_SIN_DATOS
+        except Exception:
+            return MSG_SIN_DB
+
+    return None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -250,18 +286,18 @@ def intentar(texto):
 # ─────────────────────────────────────────────────────────────
 
 def _tool_notas(*_a):
-    datos, err = _correr("notas", extra=["--json"], timeout=240)
-    return fmt_notas(datos) if datos else (err or "Sin datos del aula.")
+    r = intentar("mis notas")
+    return r if r is not None else "Sin datos del aula."
 
 
 def _tool_cursos(*_a):
-    datos, err = _correr("cursos", extra=["--json"], timeout=120)
-    return fmt_cursos(datos) if datos else (err or "Sin datos del aula.")
+    r = intentar("mis cursos")
+    return r if r is not None else "Sin datos del aula."
 
 
 def _tool_mensajes(*_a):
-    datos, err = _correr("mensajes", extra=["--json"], timeout=150)
-    return fmt_mensajes(datos) if datos else (err or "Sin datos del aula.")
+    r = intentar("mensajes del aula")
+    return r if r is not None else "Sin datos del aula."
 
 
 def registrar():

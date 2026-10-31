@@ -722,7 +722,8 @@ Pensamiento:"""
                 return respuesta_skill, []
 
         # --- [CIBERTEC_V3] Aula virtual: notas/cursos/mensajes/calendario ---
-        # (corre consultar.py con la sesión guardada; si caducó, pide SMS humano)
+        # (lee las tablas bb_* de MySQL que llena el sincronizador de Blackboard;
+        #  si aún no hay datos, indica cómo sincronizarlos en vez de reventar)
         if _cibertec_v3:
             respuesta_cib = _cibertec_v3.intentar(text)
             if respuesta_cib is not None:
