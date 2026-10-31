@@ -472,7 +472,8 @@ def procesar_mensajes(mensajes, vistos, cb=None, enviar_fn=None):
         r = responder_como_jarvis(texto, cb=cb)
         if r:
             print(f"   🤖 respondo: {str(r).splitlines()[0][:60]}", flush=True)
-            enviar_fn(r)
+            salida = enviar_fn(r)
+            print(f"      {str(salida).splitlines()[0][:90]}", flush=True)
     return ultimo_ts
 
 

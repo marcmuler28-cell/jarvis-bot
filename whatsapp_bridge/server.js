@@ -189,27 +189,68 @@ async function enviar(to, message) {
   if (!wid) {
     throw httpError(404, `el número +${digits} no tiene WhatsApp registrado`);
   }
-  try {
-    // getChatById crea el chat si hace falta. Con client.sendMessage a TU
-    // PROPIO número el resultado llega undefined y reventaba con
-    // "Cannot read properties of undefined (reading 'id')".
-    const chat = await client.getChatById(wid._serialized);
-    const enviado = await chat.sendMessage(String(message));
-    if (!enviado || !enviado.id) {
-      throw new Error('WhatsApp no devolvió confirmación del envío');
+  const texto = String(message);
+  const esPropio = propioUser && digits === propioUser;
+
+  // Envío a TI MISMO: whatsapp-web.js es quisquilloso con tu propio chat
+  // (getChatById puede traer null y chat.sendMessage devuelve undefined).
+  // Probamos 3 caminos y hasta 2 rondas; mientras NO haya excepción real,
+  // el mensaje SÍ llega al chat «Message yourself».
+  let enviado = null;
+  let errores = [];
+  let directoSinError = false;
+  for (let ronda = 0; ronda < 2 && (!enviado || !enviado.id); ronda++) {
+    if (ronda > 0) {
+      await new Promise((r) => setTimeout(r, 2000)); // pausa anti rate-limit
+      errores = [];
+      directoSinError = false;
     }
-    // Recordar los ids que envió el puente para no volver a leerlos como
-    // si fueran órdenes tuyas (evita el bucle Jarvis ↔ Jarvis).
+    // Camino 1: chat del propio número
     try {
-      idsDelPuente.add(enviado.id._serialized || enviado.id.id);
-      if (idsDelPuente.size > 1000) idsDelPuente.clear();
-    } catch (_) {}
-    log('📤 enviado a', wid._serialized);
-    return { ok: true, chatId: wid._serialized, id: enviado.id._serialized };
-  } catch (e) {
-    if (e && e.status) throw e; // ya es un error HTTP nuestro
-    throw httpError(502, `WhatsApp rechazó el envío a +${digits}: ${e && e.message}`);
+      const chat = await client.getChatById(wid._serialized);
+      if (chat) enviado = await chat.sendMessage(texto);
+    } catch (e) { errores.push('chat: ' + (e && e.message)); }
+    // Camino 2: sendMessage directo (el clásico; a veces responde undefined)
+    if (!enviado || !enviado.id) {
+      try {
+        const r2 = await client.sendMessage(wid._serialized, texto);
+        if (r2 && r2.id) enviado = r2;
+        else if (esPropio) directoSinError = true;
+      } catch (e) { errores.push('directo: ' + (e && e.message)); }
+    }
+    // Camino 3 (solo a ti mismo): buscar el chat en la lista y enviarle
+    if ((!enviado || !enviado.id) && esPropio) {
+      try {
+        const chats = await client.getChats();
+        const propio = (chats || []).find(
+          (c) => c && c.id && c.id._serialized === wid._serialized);
+        if (propio) {
+          const r3 = await propio.sendMessage(texto);
+          if (r3 && r3.id) enviado = r3;
+        }
+      } catch (e) { errores.push('lista: ' + (e && e.message)); }
+    }
   }
+
+  const idSer = enviado && enviado.id ? (enviado.id._serialized || enviado.id.id) : null;
+  if (!idSer) {
+    // Sin excepción y a ti mismo = entregado aunque WhatsApp no confirme.
+    if (esPropio && (errores.length === 0 || directoSinError)) {
+      log('📤 enviado a TI MISMO', wid._serialized, '(sin confirmación de WhatsApp)');
+      return { ok: true, chatId: wid._serialized, id: null,
+               nota: 'entregado sin confirmación de WhatsApp' };
+    }
+    throw httpError(502,
+      `WhatsApp no aceptó el envío a +${digits}: ${errores.join(' | ') || 'sin confirmación'}`);
+  }
+  // Recordar el id que envió el puente para no volver a leerlo como
+  // si fuera una orden tuya (evita el bucle Jarvis ↔ Jarvis).
+  try {
+    idsDelPuente.add(idSer);
+    if (idsDelPuente.size > 1000) idsDelPuente.clear();
+  } catch (_) {}
+  log('📤 enviado a', wid._serialized);
+  return { ok: true, chatId: wid._serialized, id: idSer };
 }
 
 const server = http.createServer(async (req, res) => {
