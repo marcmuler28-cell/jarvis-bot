@@ -258,7 +258,7 @@ def enviar(destinatario, mensaje):
     if _es_yo(destinatario):
         destino = _mi_numero()
         if not destino:
-            return "No sé todavía cuál es tu número (¿el puente ya arrancó?)."
+            return "Todavía no puedo enviarte a ti mismo. " + estado()
     elif destinatario:
         res = resolver(destinatario)
         if res:

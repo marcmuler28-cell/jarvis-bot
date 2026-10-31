@@ -12,6 +12,13 @@ PASS = os.getenv("JARVIS_BB_PASS") or os.getenv("PASS")
 
 STORAGE_STATE = "blackboard_state.json"  # Ahora guardará las cookies de ambos dominios
 
+# Chromium del SISTEMA (evita descargar el navegador de playwright, ~170 MB).
+# Si no hay ninguno, Playwright usará el suyo (requiere: python -m playwright install chromium).
+_CHROME = (os.environ.get("JARVIS_CHROME_PATH")
+           or next((p for p in ("/usr/bin/chromium", "/usr/bin/chromium-browser",
+                                "/usr/bin/google-chrome-stable", "/usr/bin/google-chrome")
+                    if os.path.exists(p)), None))
+
 def main():
     print("=== LOGIN UNIFICADO BLACKBOARD + MICIBERTEC ===")
     print(f"Usuario: {USER}")
@@ -25,6 +32,7 @@ def main():
         # Lanzar navegador
         browser = p.chromium.launch(
             headless=True,
+            executable_path=_CHROME,
             args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         context = browser.new_context()

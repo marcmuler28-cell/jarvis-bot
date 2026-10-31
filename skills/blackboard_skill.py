@@ -204,8 +204,15 @@ class BlackboardSkill:
             except Exception:
                 pass
         self.playwright = sync_playwright().start()
+        # Chromium del SISTEMA si existe (no descargamos el de playwright);
+        # JARVIS_CHROME_PATH permite forzar otro ejecutable.
+        chrome = (os.environ.get("JARVIS_CHROME_PATH")
+                  or next((p for p in ("/usr/bin/chromium", "/usr/bin/chromium-browser",
+                                       "/usr/bin/google-chrome-stable", "/usr/bin/google-chrome")
+                           if os.path.exists(p)), None))
         self.browser = self.playwright.chromium.launch(
             headless=True,
+            executable_path=chrome,
             args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
 

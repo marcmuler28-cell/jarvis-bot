@@ -254,7 +254,7 @@ class TestYoYEscucha(BaseWa):
         os.environ["JARVIS_WA_BRIDGE_URL"] = "http://127.0.0.1:1"
         importlib.reload(wa)
         self.assertEqual(wa._mi_numero(), "")
-        self.assertIn("No sé todavía", wa.enviar("yo", "hola"))
+        self.assertIn("no puedo enviarte a ti mismo", wa.enviar("yo", "hola").lower())
 
     def _fake_cb(self, resp):
         return types.SimpleNamespace(intentar=lambda t: resp)
