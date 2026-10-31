@@ -43,6 +43,33 @@ import unicodedata
 import urllib.error
 import urllib.request
 
+
+def _cargar_env(ruta=None):
+    """Lee KEY=VALOR del .env de la raíz del proyecto (solo stdlib).
+
+    No pisa variables ya exportadas en la sesión; si el archivo no existe,
+    sigue silenciosamente. Así el JARVIS_WA_BRIDGE_TOKEN del .env sirve
+    igual para el cerebro (api_gateway) que para la CLI de prueba.
+    """
+    if ruta is None:
+        ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    try:
+        with open(ruta, "r", encoding="utf-8") as f:
+            for linea in f:
+                linea = linea.strip()
+                if not linea or linea.startswith("#") or "=" not in linea:
+                    continue
+                clave, _, valor = linea.partition("=")
+                clave = clave.strip()
+                valor = valor.strip().strip('"').strip("'")
+                if clave and clave not in os.environ:
+                    os.environ[clave] = valor
+    except OSError:
+        pass
+
+
+_cargar_env()
+
 # ─────────────────────────────────────────────────────────────
 # Configuración
 # ─────────────────────────────────────────────────────────────
