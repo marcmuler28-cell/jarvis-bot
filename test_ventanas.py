@@ -42,6 +42,29 @@ CLIENTES = [
 ]
 
 
+# hyprctl FALSO autocontenido (el test NO depende de rutas externas)
+FAKE_HYPRCTL = r'''#!/usr/bin/env bash
+# hyprctl FALSO para probar jarvis_windows.py sin Hyprland.
+set -u
+LOG="${FAKE_HYPR_LOG:-/tmp/fake_hyprctl.log}"
+echo "CMD: $*" >> "$LOG"
+if [[ "${1:-}" == "-j" ]]; then
+  case "${2:-}" in
+    clients)
+      cat "${FAKE_CLIENTS_JSON:?define FAKE_CLIENTS_JSON}"; exit 0;;
+    activeworkspace)
+      echo '{"id":2,"name":"2"}'; exit 0;;
+    activewindow)
+      echo '{"address":"0x2","class":"kitty","initialClass":"kitty","title":"~/proyectos","mapped":true,"focused":true,"workspace":{"id":2,"name":"2"},"pid":123}'; exit 0;;
+  esac
+fi
+if [[ "${FAKE_FAIL_DISPATCH:-0}" == "1" && "${1:-}" == "dispatch" ]]; then
+  echo "invalid dispatcher"; exit 0
+fi
+echo "ok"
+'''
+
+
 class BaseConFakeHyprctl(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="jarvis_test_")
@@ -52,7 +75,8 @@ class BaseConFakeHyprctl(unittest.TestCase):
         self.bin_dir = os.path.join(self.tmp, "bin")
         os.makedirs(self.bin_dir)
         fake = os.path.join(self.bin_dir, "hyprctl")
-        shutil.copy("/home/z/my-project/scripts/fake_hyprctl.sh", fake)
+        with open(fake, "w", encoding="utf-8") as f:
+            f.write(FAKE_HYPRCTL)
         os.chmod(fake, 0o755)
         self.env = dict(os.environ)
         self.env["PATH"] = self.bin_dir + os.pathsep + self.env["PATH"]
