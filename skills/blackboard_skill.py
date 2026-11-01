@@ -138,8 +138,24 @@ class BlackboardSkill:
             try:
                 self.page.goto(BLACKBOARD_LOGIN, wait_until="domcontentloaded", timeout=15000)
                 if "login.microsoftonline.com" not in self.page.url:
-                    logger.info("Sesión reutilizada correctamente.")
-                    return True
+                    # Verificación REAL de la sesión: el 1-nov-2026 el chequeo
+                    # por URL decía «reutilizada» pero la API respondía 401
+                    # (sesión de Ultra caducada) y el sync dejaba bb_messages
+                    # en cero. users/me -> 401 significa sesión muerta;
+                    # 404/0 no decide (el endpoint pudo cambiar).
+                    sesion = self._bb_api('/users/me')
+                    if sesion.get("status") == 401:
+                        logger.warning("La sesión guardada ha caducado "
+                                       "(users/me -> 401), forzando login manual.")
+                        try:
+                            self.context.close()
+                        except Exception:
+                            pass
+                        self.context = None
+                        self.page = None
+                    else:
+                        logger.info("Sesión reutilizada correctamente.")
+                        return True
             except Exception:
                 logger.warning("La sesión guardada ha caducado, forzando login manual.")
                 try:
@@ -245,12 +261,9 @@ class BlackboardSkill:
             # completa: trae leídos y sin leer de todos los cursos, sin
             # depender del DOM); si falla o no trae nada, scrapeo del DOM.
             try:
-                self._fetch_blackboard_messages_api()
+                n = self._fetch_blackboard_messages_api()
             except Exception as e:
                 logger.warning(f"API de mensajes falló ({e}); uso el scrapeo del DOM.")
-            try:
-                n = self.db.query("SELECT COUNT(*) FROM bb_messages")[0][0]
-            except Exception:
                 n = 0
             if not n:
                 logger.info("La API no trajo mensajes; probando el scrapeo del DOM...")
@@ -260,46 +273,60 @@ class BlackboardSkill:
         finally:
             self.close()
 
-    def _fetch_blackboard_messages_api(self):
-        """Mensajes vía la API interna de Blackboard Ultra (verificada
-        31-oct-2026 con sesión real). Más completo y robusto que el scraping
-        de /ultra/messages: trae TODOS los mensajes (leídos y sin leer) de
-        TODOS los cursos. Misma tabla bb_messages."""
-        base = "https://cibertec.blackboard.com"
-        req = self.context.request
+    def _bb_api(self, ruta, params=None):
+        """GET a la API interna de Blackboard (learn/api/v1) hecho DESDE la
+        página con fetch(credentials:'include'): lleva exactamente las
+        mismas cookies del navegador que usa el SPA de Ultra. El request del
+        contexto de Playwright (context.request) daba HTTP 401 porque
+        Blackboard exige el contexto real del navegador. Devuelve
+        {"status": int, "body": dict|None, "error": str}."""
+        qs = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+        url = ("https://cibertec.blackboard.com/learn/api/v1" + ruta
+               + ("?" + qs if qs else ""))
+        js = ("async (url) => { try { const r = await fetch(url, "
+              "{credentials: 'include', headers: {'Accept': 'application/json'}}); "
+              "const body = r.ok ? await r.json() : null; "
+              "return {status: r.status, body: body}; } "
+              "catch (e) { return {status: 0, body: null, error: String(e)}; } }")
+        try:
+            return self.page.evaluate(js, url) or {"status": 0, "body": None}
+        except Exception as e:
+            return {"status": 0, "body": None, "error": str(e)}
 
-        def api(path, params=None):
-            r = req.get(f"{base}{path}", params=params or {}, timeout=60000)
-            if r.status == 404:
-                return {"results": []}
-            if not r.ok:
-                logger.warning(f"API {path} -> HTTP {r.status}")
-                return {"results": []}
-            return r.json()
+    def _fetch_blackboard_messages_api(self):
+        """Mensajes vía la API interna de Blackboard Ultra, llamada desde
+        dentro de la página (fetch con las cookies de sesión). Inserta SOLO
+        si hay datos: antes hacía DELETE primero y un 401 dejaba bb_messages
+        vacía. Devuelve el total insertado (0 = nada; el flujo cae al DOM)."""
+        # El fetch debe salir de una página del dominio de Blackboard
+        url_actual = self.page.url if self.page else ""
+        if "cibertec.blackboard.com" not in url_actual:
+            self.page.goto(BLACKBOARD_MESSAGES, wait_until="domcontentloaded",
+                           timeout=30000)
+            self.page.wait_for_timeout(3000)
 
         logger.info("Extrayendo mensajes de Blackboard vía API interna...")
-        self.db.execute('DELETE FROM bb_messages')
-
-        offset, total = 0, 0
+        filas = []
+        offset = 0
         while True:
-            resumen = api('/learn/api/v1/messages/summary',
-                          {'limit': 25, 'offset': offset}).get('results', [])
-            for cur in resumen:
+            resumen = self._bb_api('/messages/summary',
+                                   {'limit': 25, 'offset': offset})
+            if resumen.get("status") != 200:
+                logger.warning(f"API messages/summary -> HTTP {resumen.get('status')} "
+                               f"{resumen.get('error') or ''}")
+                return 0
+            resultados = ((resumen.get("body") or {}).get('results') or [])
+            for cur in resultados:
                 cid = cur.get('courseId') or ""
                 nombre = (cur.get('courseName') or '').strip()
-                try:
-                    convs = api(f'/learn/api/v1/courses/{cid}/conversations',
-                                {'limit': 25}).get('results', [])
-                except Exception as e:
-                    logger.warning(f"Sin conversaciones en {nombre}: {e}")
-                    continue
+                convs = ((self._bb_api(f'/courses/{cid}/conversations',
+                                       {'limit': 25}).get("body") or {})
+                         .get('results') or [])
                 for cv in convs:
                     conv_id = cv.get('id') or ""
-                    try:
-                        ms = api(f'/learn/api/v1/courses/{cid}/conversations/{conv_id}/messages',
-                                 {'limit': 50}).get('results', [])
-                    except Exception:
-                        continue
+                    ms = ((self._bb_api(
+                        f'/courses/{cid}/conversations/{conv_id}/messages',
+                        {'limit': 50}).get("body") or {}).get('results') or [])
                     for m in ms:
                         body = m.get('body')
                         raw = body.get('rawText') if isinstance(body, dict) else (body or "")
@@ -312,33 +339,68 @@ class BlackboardSkill:
                                          or sender.get('userId') or '')
                         else:
                             remitente = str(sender or m.get('senderId') or '')
-                        self.db.execute('''
-                            INSERT INTO bb_messages (course_id, course_name, remitente,
-                                fecha, destinatarios, cuerpo, unread, last_updated)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (cid, nombre, remitente, (m.get('postDate') or '')[:19],
-                              "", texto, 0 if m.get('isRead') else 1, datetime.now()))
-                        total += 1
-            if len(resumen) < 25:
+                        filas.append((cid, nombre, remitente,
+                                      (m.get('postDate') or '')[:19], "",
+                                      texto, 0 if m.get('isRead') else 1))
+            if len(resultados) < 25:
                 break
             offset += 25
-        logger.info(f"Mensajes extraídos vía API: {total} mensajes.")
+
+        if not filas:
+            logger.info("Mensajes extraídos vía API: 0 mensajes.")
+            return 0
+        self.db.execute('DELETE FROM bb_messages')
+        ahora = datetime.now()
+        for fila in filas:
+            self.db.execute('''
+                INSERT INTO bb_messages (course_id, course_name, remitente,
+                    fecha, destinatarios, cuerpo, unread, last_updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', fila + (ahora,))
+        logger.info(f"Mensajes extraídos vía API: {len(filas)} mensajes.")
+        return len(filas)
 
     def _fetch_blackboard_messages(self):
-        logger.info("Extrayendo mensajes de Blackboard...")
+        logger.info("Extrayendo mensajes de Blackboard (scrapeo del DOM)...")
+        # Registrar las XHR que la propia página Ultra dispara: si el SPA
+        # logró listar mensajes, su API respondió 200 y vale la pena
+        # reintentar por API aunque el DOM no pinte [data-course-id].
+        capturadas = []
+
+        def _capturar(resp):
+            try:
+                u = resp.url
+                if ("cibertec.blackboard.com" in u and "/learn/api/v1/" in u
+                        and ("message" in u or "conversation" in u)):
+                    capturadas.append((u, resp.status))
+            except Exception:
+                pass
+
+        self.page.on("response", _capturar)
         self.page.goto(BLACKBOARD_MESSAGES, wait_until="domcontentloaded", timeout=30000)
         self.page.wait_for_load_state("networkidle", timeout=30000)
 
-        # Bucle de espera activa
+        # Bucle de espera activa, buscando también en iframes
         cursos = []
         for _ in range(15):
-            cursos = self.page.query_selector_all("[data-course-id]")
+            for frame in self.page.frames:
+                try:
+                    cursos = frame.query_selector_all("[data-course-id]")
+                except Exception:
+                    cursos = []
+                if cursos:
+                    break
             if cursos:
                 break
             self.page.wait_for_timeout(2000)
 
         if not cursos:
             logger.warning("No se encontraron cursos en la página de mensajes.")
+            if any('/messages/summary' in u for u, s in capturadas if s == 200):
+                logger.info("La página sí llamó a la API interna; reintento por API...")
+                if self._fetch_blackboard_messages_api():
+                    return
+            self._volcar_debug_mensajes(capturadas)
             return
 
         total_cursos = len(cursos)
@@ -413,6 +475,32 @@ class BlackboardSkill:
                 ''', (course_id, nombre_curso, remitente, fecha, destinatarios, cuerpo, unread, datetime.now()))
 
         logger.info(f"Mensajes extraídos: {total_cursos} cursos procesados.")
+
+    def _volcar_debug_mensajes(self, capturadas=None):
+        """Guarda el HTML de TODOS los frames de /ultra/messages y las URLs
+        de la API interna vistas, en ~/.jarvis/, para diagnosticar con
+        evidencia real por qué no hay mensajes (mismo enfoque que /cursos)."""
+        try:
+            carpeta = os.path.join(os.path.expanduser("~"), ".jarvis")
+            os.makedirs(carpeta, exist_ok=True)
+            ruta = os.path.join(
+                carpeta, f"debug_mensajes_{datetime.now():%Y%m%d_%H%M%S}.html")
+            with open(ruta, "w", encoding="utf-8") as f:
+                f.write(f"URL final: {self.page.url}\n")
+                for i, frame in enumerate(self.page.frames):
+                    try:
+                        html = frame.content() or ""
+                    except Exception:
+                        continue
+                    f.write(f"\n\n===== FRAME {i} ({frame.url}) =====\n")
+                    f.write(html)
+            logger.warning(f"HTML de /ultra/messages guardado en {ruta} "
+                           "(revísalo/mándamelo para ajustar los selectores)")
+            if capturadas:
+                logger.warning(f"APIs de mensajes vistas ({len(capturadas)}): "
+                               f"{[u for u, _ in capturadas][:15]}")
+        except Exception as e:
+            logger.warning(f"No pude guardar el debug de mensajes: {e}")
 
     # ─── MICIBERTEC ───────────────────────────────────────
     def _acceder_a_micibertec(self):
