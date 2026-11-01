@@ -241,11 +241,88 @@ class BlackboardSkill:
     def fetch_all_data(self):
         self.login()
         try:
-            self._fetch_blackboard_messages()
+            # Mensajes: primero la API interna de Blackboard Ultra (más
+            # completa: trae leídos y sin leer de todos los cursos, sin
+            # depender del DOM); si falla o no trae nada, scrapeo del DOM.
+            try:
+                self._fetch_blackboard_messages_api()
+            except Exception as e:
+                logger.warning(f"API de mensajes falló ({e}); uso el scrapeo del DOM.")
+            try:
+                n = self.db.query("SELECT COUNT(*) FROM bb_messages")[0][0]
+            except Exception:
+                n = 0
+            if not n:
+                logger.info("La API no trajo mensajes; probando el scrapeo del DOM...")
+                self._fetch_blackboard_messages()
             self._fetch_micibertec_all()
             logger.info("Datos extraídos y guardados exitosamente.")
         finally:
             self.close()
+
+    def _fetch_blackboard_messages_api(self):
+        """Mensajes vía la API interna de Blackboard Ultra (verificada
+        31-oct-2026 con sesión real). Más completo y robusto que el scraping
+        de /ultra/messages: trae TODOS los mensajes (leídos y sin leer) de
+        TODOS los cursos. Misma tabla bb_messages."""
+        base = "https://cibertec.blackboard.com"
+        req = self.context.request
+
+        def api(path, params=None):
+            r = req.get(f"{base}{path}", params=params or {}, timeout=60000)
+            if r.status == 404:
+                return {"results": []}
+            if not r.ok:
+                logger.warning(f"API {path} -> HTTP {r.status}")
+                return {"results": []}
+            return r.json()
+
+        logger.info("Extrayendo mensajes de Blackboard vía API interna...")
+        self.db.execute('DELETE FROM bb_messages')
+
+        offset, total = 0, 0
+        while True:
+            resumen = api('/learn/api/v1/messages/summary',
+                          {'limit': 25, 'offset': offset}).get('results', [])
+            for cur in resumen:
+                cid = cur.get('courseId') or ""
+                nombre = (cur.get('courseName') or '').strip()
+                try:
+                    convs = api(f'/learn/api/v1/courses/{cid}/conversations',
+                                {'limit': 25}).get('results', [])
+                except Exception as e:
+                    logger.warning(f"Sin conversaciones en {nombre}: {e}")
+                    continue
+                for cv in convs:
+                    conv_id = cv.get('id') or ""
+                    try:
+                        ms = api(f'/learn/api/v1/courses/{cid}/conversations/{conv_id}/messages',
+                                 {'limit': 50}).get('results', [])
+                    except Exception:
+                        continue
+                    for m in ms:
+                        body = m.get('body')
+                        raw = body.get('rawText') if isinstance(body, dict) else (body or "")
+                        texto = re.sub(r'<[^>]+>', ' ', raw or '')
+                        texto = re.sub(r'\s{2,}', ' ', texto).strip()
+                        sender = m.get('sender')
+                        if isinstance(sender, dict):
+                            remitente = (sender.get('displayName')
+                                         or sender.get('userName')
+                                         or sender.get('userId') or '')
+                        else:
+                            remitente = str(sender or m.get('senderId') or '')
+                        self.db.execute('''
+                            INSERT INTO bb_messages (course_id, course_name, remitente,
+                                fecha, destinatarios, cuerpo, unread, last_updated)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (cid, nombre, remitente, (m.get('postDate') or '')[:19],
+                              "", texto, 0 if m.get('isRead') else 1, datetime.now()))
+                        total += 1
+            if len(resumen) < 25:
+                break
+            offset += 25
+        logger.info(f"Mensajes extraídos vía API: {total} mensajes.")
 
     def _fetch_blackboard_messages(self):
         logger.info("Extrayendo mensajes de Blackboard...")
@@ -382,10 +459,12 @@ class BlackboardSkill:
         logger.warning("No se pudo acceder a MiCibertec tras múltiples intentos.")
         return False
 
-    # ── búsqueda tolerante a iframes: el portal estudiante mete el contenido
-    # de /cursos en marcos internos (o lo pinta tarde, tipo SPA); mirar solo
-    # el documento principal a los 5 s fijos fue la causa de «No se
-    # encontraron enlaces a detalle de curso».
+    # ── búsqueda tolerante a iframes: el portal estudiante pinta el
+    # contenido de /cursos dentro de iframes y tarde (SPA Nuxt), y además
+    # REDISEÑÓ las tarjetas (el nombre ahora está en
+    # span[id^='list-modulo_'], antes span[id^='card']) — mirar solo el
+    # documento principal a los 5 s fijos fue la causa de «No se
+    # encontraron enlaces a detalle de curso» y de las tablas en 0 filas.
     _SELECTORES_CURSO = (                       # del más estricto al más amplio
         "a[href*='/cursos/detail?course=']",
         "a[href*='cursos/detail']",
@@ -413,8 +492,16 @@ class BlackboardSkill:
                         if not ("cursos" in href.lower() or "course" in href.lower()):
                             continue
                         try:
-                            span = enlace.query_selector("span[id^='card']")
-                            nombre = (span or enlace).inner_text().strip()
+                            # El portal Nuxt REDISEÑÓ las tarjetas: el nombre
+                            # ahora vive en span[id^='list-modulo_'] (antes
+                            # span[id^='card']); conservamos los fallbacks.
+                            span = (enlace.query_selector("span[id^='list-modulo_']")
+                                    or enlace.query_selector("span[id^='card']")
+                                    or enlace.query_selector("h3, h4"))
+                            if span:
+                                nombre = span.inner_text().strip()
+                            else:
+                                nombre = enlace.inner_text().strip().split("\n")[0].strip()
                         except Exception:
                             nombre = ""
                         nombre = re.sub(r"\s+", " ", nombre or "").strip()

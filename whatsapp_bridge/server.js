@@ -211,53 +211,54 @@ async function enviar(to, message) {
   const texto = String(message);
   const esPropio = propioUser && digits === propioUser;
 
-  // Envío a TI MISMO: whatsapp-web.js es quisquilloso con tu propio chat
-  // (getChatById puede traer null y chat.sendMessage devuelve undefined).
-  // Probamos 3 caminos y hasta 2 rondas; mientras NO haya excepción real,
-  // el mensaje SÍ llega al chat «Message yourself».
-  let enviado = null;
-  let errores = [];
-  let directoSinError = false;
-  for (let ronda = 0; ronda < 2 && (!enviado || !enviado.id); ronda++) {
-    if (ronda > 0) {
-      await new Promise((r) => setTimeout(r, 2000)); // pausa anti rate-limit
-      errores = [];
-      directoSinError = false;
+  // UN SOLO envío real por petición. whatsapp-web.js a veces ENTREGA el
+  // mensaje y aun así responde undefined (sin id) — sobre todo a ti mismo.
+  // Reintentar cuando solo faltó el id REENVIABA el mismo texto: por eso
+  // Jarvis «hablaba dos veces». Los caminos 2 y 3 solo corren si el anterior
+  // REVENTÓ de verdad (excepción), no si solo faltó la confirmación.
+  let enviado = null;          // envío CON id confirmado
+  let sinExcepcion = false;    // algún camino ejecutó sendMessage sin reventar
+  const errores = [];
+  // Camino 1: chat del propio número
+  try {
+    const chat = await client.getChatById(wid._serialized);
+    if (chat) {
+      enviado = await chat.sendMessage(texto);
+      sinExcepcion = true;
     }
-    // Camino 1: chat del propio número
+  } catch (e) { errores.push('chat: ' + (e && e.message)); }
+  // Camino 2: sendMessage directo (el clásico) — solo si el 1 reventó
+  if (!sinExcepcion) {
     try {
-      const chat = await client.getChatById(wid._serialized);
-      if (chat) enviado = await chat.sendMessage(texto);
-    } catch (e) { errores.push('chat: ' + (e && e.message)); }
-    // Camino 2: sendMessage directo (el clásico; a veces responde undefined)
-    if (!enviado || !enviado.id) {
-      try {
-        const r2 = await client.sendMessage(wid._serialized, texto);
-        if (r2 && r2.id) enviado = r2;
-        else if (esPropio) directoSinError = true;
-      } catch (e) { errores.push('directo: ' + (e && e.message)); }
-    }
-    // Camino 3 (solo a ti mismo): buscar el chat en la lista y enviarle
-    if ((!enviado || !enviado.id) && esPropio) {
-      try {
-        const chats = await client.getChats();
-        const propio = (chats || []).find(
-          (c) => c && c.id && c.id._serialized === wid._serialized);
-        if (propio) {
-          const r3 = await propio.sendMessage(texto);
-          if (r3 && r3.id) enviado = r3;
-        }
-      } catch (e) { errores.push('lista: ' + (e && e.message)); }
-    }
+      const r2 = await client.sendMessage(wid._serialized, texto);
+      if (r2 && r2.id) enviado = r2;
+      sinExcepcion = true;
+    } catch (e) { errores.push('directo: ' + (e && e.message)); }
+  }
+  // Camino 3 (solo a ti mismo): buscar el chat en la lista — solo si los
+  // dos anteriores reventaron
+  if (!sinExcepcion && esPropio) {
+    try {
+      const chats = await client.getChats();
+      const propio = (chats || []).find(
+        (c) => c && c.id && c.id._serialized === wid._serialized);
+      if (propio) {
+        const r3 = await propio.sendMessage(texto);
+        if (r3 && r3.id) enviado = r3;
+        sinExcepcion = true;
+      }
+    } catch (e) { errores.push('lista: ' + (e && e.message)); }
   }
 
   const idSer = enviado && enviado.id ? (enviado.id._serialized || enviado.id.id) : null;
   ultimoTextoEnviado = texto.slice(0, 500); // para reconocer el eco aunque no haya id
   ultimoEnvioTs = Math.floor(Date.now() / 1000);
   if (!idSer) {
-    // Sin excepción y a ti mismo = entregado aunque WhatsApp no confirme.
-    if (esPropio && (errores.length === 0 || directoSinError)) {
-      log('📤 enviado a TI MISMO', wid._serialized, '(sin confirmación de WhatsApp)');
+    // Sin ninguna excepción = el mensaje SE ENTREGÓ aunque WhatsApp no
+    // devolviera el id (típico enviándote a ti mismo). NO reintentar:
+    // un reintento duplicaría el mensaje.
+    if (sinExcepcion) {
+      log('📤 enviado a', wid._serialized, '(sin confirmación de WhatsApp)');
       return { ok: true, chatId: wid._serialized, id: null,
                nota: 'entregado sin confirmación de WhatsApp' };
     }
