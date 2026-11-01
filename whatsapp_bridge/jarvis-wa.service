@@ -1,0 +1,20 @@
+[Unit]
+Description=JarvisBot - puente de WhatsApp (Node) + oyente de tu chat
+# Vive con la sesion de usuario: arranca al encender la PC (con linger,
+# incluso antes de abrir sesion) y se apaga cuando la PC se apaga.
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Proyectos/JarvisBot/whatsapp_bridge
+ExecStart=%h/Proyectos/JarvisBot/whatsapp_bridge/iniciar.sh
+# Al parar, remata tambien al chromium del puente (no queda huerfano):
+ExecStop=/usr/bin/pkill -f wwebjs_auth
+# Si node se cae, se levanta solo a los 10 s (tapa carreras de red al boot)
+Restart=always
+RestartSec=10
+# El oyente python (jarvis_whatsapp.py escuchar) nace dentro de este mismo
+# cgroup: al parar el servicio, systemd mata node Y al oyente. Nada queda
+# colgado ni hay dobles oyentes.
+
+[Install]
+WantedBy=default.target
