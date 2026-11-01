@@ -546,22 +546,33 @@ def _lock_escucha():
     flock (mejor escuchar sin cerrojo que quedarse mudo).
     """
     import fcntl  # POSIX (Linux/macOS); en Windows cae al except de abajo
+    import time
     ruta = os.environ.get("JARVIS_WA_ESCUCHA_LOCK",
                           os.path.join(os.path.expanduser("~"), ".jarvis", "wa_escucha.lock"))
     try:
         os.makedirs(os.path.dirname(ruta), exist_ok=True)
-        f = open(ruta, "w")
-        try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            f.close()
-            return None
-        f.write(str(os.getpid()))
-        f.truncate()
-        f.flush()
-        return f
     except OSError:
         return "sin-lock"
+    # Al reiniciar el puente, el oyente anterior acaba de recibir el pkill y
+    # su cerrojo puede tardar un instante en liberarse: reintentamos unos
+    # segundos antes de declarar que «ya hay otro oyente» (si no, el oyente
+    # nuevo muere con «Terminado» y se queda Jarvis sin orejas).
+    intentos = max(1, int(os.environ.get("JARVIS_WA_ESCUCHA_LOCK_INTENTOS", "5")))
+    for _ in range(intentos):
+        try:
+            f = open(ruta, "w")
+        except OSError:
+            return "sin-lock"
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            f.write(str(os.getpid()))
+            f.truncate()
+            f.flush()
+            return f
+        except OSError:
+            f.close()
+            time.sleep(1)
+    return None
 
 
 def escuchar():

@@ -46,6 +46,7 @@ if command -v python3 >/dev/null 2>&1; then
   PY="$RAIZ/venv_linux/bin/python"
   [ -x "$PY" ] || PY="$(command -v python3)"
   pkill -f "jarvis_whatsapp.py escuchar" 2>/dev/null || true
+  sleep 1   # dale un segundo al viejo para soltar el cerrojo del oyente
   mkdir -p "$HOME/.jarvis"
   (cd .. && nohup "$PY" jarvis_whatsapp.py escuchar >> "$HOME/.jarvis/wa_escucha.log" 2>&1 & disown) || true
   echo "👂 Escucha de tu chat propio lanzada con $(basename "$PY") (log: ~/.jarvis/wa_escucha.log)"

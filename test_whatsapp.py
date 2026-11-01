@@ -318,10 +318,12 @@ class TestOyenteUnico(unittest.TestCase):
     def setUp(self):
         self.ruta = os.path.join(TMP, "escucha.lock")
         os.environ["JARVIS_WA_ESCUCHA_LOCK"] = self.ruta
+        os.environ["JARVIS_WA_ESCUCHA_LOCK_INTENTOS"] = "1"  # sin esperas en tests
         importlib.reload(wa)
 
     def tearDown(self):
         os.environ.pop("JARVIS_WA_ESCUCHA_LOCK", None)
+        os.environ.pop("JARVIS_WA_ESCUCHA_LOCK_INTENTOS", None)
         importlib.reload(wa)
 
     def test_segundo_oyente_se_retira(self):
