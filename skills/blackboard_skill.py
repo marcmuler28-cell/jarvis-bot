@@ -382,23 +382,144 @@ class BlackboardSkill:
         logger.warning("No se pudo acceder a MiCibertec tras múltiples intentos.")
         return False
 
+    # ── búsqueda tolerante a iframes: el portal estudiante mete el contenido
+    # de /cursos en marcos internos (o lo pinta tarde, tipo SPA); mirar solo
+    # el documento principal a los 5 s fijos fue la causa de «No se
+    # encontraron enlaces a detalle de curso».
+    _SELECTORES_CURSO = (                       # del más estricto al más amplio
+        "a[href*='/cursos/detail?course=']",
+        "a[href*='cursos/detail']",
+        "a[href*='detail?course=']",
+        "a[href*='course=']",
+    )
+
+    def _enlaces_de_cursos(self, tiempo_ms=20000):
+        """Enlaces (nombre, href) de los cursos del ciclo, buscados en TODOS
+        los frames y con varios patrones de href. Espera hasta tiempo_ms a que
+        el SPA pinte las tarjetas. Devuelve [] si de verdad no hay nada."""
+        limite = time.time() + tiempo_ms / 1000
+        while time.time() < limite:
+            for sel in self._SELECTORES_CURSO:
+                encontrados, vistos = [], set()
+                for frame in self.page.frames:
+                    try:
+                        enlaces = frame.query_selector_all(sel)
+                    except Exception:
+                        continue
+                    for enlace in enlaces:
+                        href = enlace.get_attribute("href") or ""
+                        if not href or href in vistos:
+                            continue
+                        if not ("cursos" in href.lower() or "course" in href.lower()):
+                            continue
+                        try:
+                            span = enlace.query_selector("span[id^='card']")
+                            nombre = (span or enlace).inner_text().strip()
+                        except Exception:
+                            nombre = ""
+                        nombre = re.sub(r"\s+", " ", nombre or "").strip()
+                        if not nombre:
+                            continue
+                        vistos.add(href)
+                        encontrados.append((nombre, href))
+                if encontrados:
+                    return encontrados
+            try:
+                self.page.wait_for_timeout(1500)
+            except Exception:
+                break
+        return []
+
+    def _enlaces_por_regex(self):
+        """Último recurso: hrefs de detalle de curso sacados del HTML crudo
+        de todos los frames (aunque las tarjetas no sean <a> normales)."""
+        patron = re.compile(
+            r"href=[\"']([^\"']*(?:cursos/detail|detail\?course=)[^\"']*)[\"']", re.I)
+        vistos, cursos = set(), []
+        for frame in self.page.frames:
+            try:
+                html = frame.content()
+            except Exception:
+                continue
+            for href in patron.findall(html):
+                href = href.replace("&amp;", "&")
+                if href in vistos:
+                    continue
+                vistos.add(href)
+                m = re.search(r"course=([^&/'\"]+)", href)
+                cursos.append((f"Curso {m.group(1)}" if m else "Curso", href))
+        return cursos
+
+    def _buscar_tabla(self, encabezados=(), celda=None, tiempo_ms=8000):
+        """Tabla en CUALQUIER frame cuyos th contengan todos los textos de
+        `encabezados`, o que tenga una celda con el texto exacto `celda`.
+        Devuelve (frame, tabla) o (None, None)."""
+        limite = time.time() + tiempo_ms / 1000
+        while time.time() < limite:
+            for frame in self.page.frames:
+                try:
+                    tablas = frame.query_selector_all("table")
+                except Exception:
+                    continue
+                for t in tablas:
+                    try:
+                        if encabezados:
+                            ths = " ".join((th.inner_text() or "")
+                                           for th in t.query_selector_all("th")).lower()
+                            if all(e.lower() in ths for e in encabezados):
+                                return frame, t
+                        elif celda is not None:
+                            if any((td.inner_text() or "").strip() == celda
+                                   for td in t.query_selector_all("td")):
+                                return frame, t
+                    except Exception:
+                        continue
+            try:
+                self.page.wait_for_timeout(1000)
+            except Exception:
+                break
+        return None, None
+
+    def _volcar_debug_cursos(self):
+        """Guarda el HTML de TODOS los frames de /cursos en ~/.jarvis/ para
+        diagnosticar con evidencia real qué está sirviendo la plataforma."""
+        try:
+            carpeta = os.path.join(os.path.expanduser("~"), ".jarvis")
+            os.makedirs(carpeta, exist_ok=True)
+            ruta = os.path.join(
+                carpeta, f"debug_cursos_{datetime.now():%Y%m%d_%H%M%S}.html")
+            hrefs = []
+            with open(ruta, "w", encoding="utf-8") as f:
+                f.write(f"URL final: {self.page.url}\n")
+                for i, frame in enumerate(self.page.frames):
+                    try:
+                        html = frame.content() or ""
+                    except Exception:
+                        continue
+                    f.write(f"\n\n===== FRAME {i} ({frame.url}) =====\n")
+                    f.write(html)
+                    hrefs += [h for h in re.findall(r'href="([^"]+)"', html)
+                              if h not in hrefs]
+            logger.warning(f"HTML de /cursos guardado en {ruta} "
+                           "(revísalo/mándamelo para ajustar los selectores)")
+            logger.warning(f"Enlaces visibles ({len(hrefs)}): {hrefs[:40]}")
+        except Exception as e:
+            logger.warning(f"No pude guardar el debug de /cursos: {e}")
+
     def _fetch_micibertec_all(self):
         if not self._acceder_a_micibertec():
             return
         self.page.goto("https://estudiante.cibertec.edu.pe/cursos", wait_until="domcontentloaded", timeout=30000)
-        self.page.wait_for_timeout(5000)
-        cursos = []
-        enlaces = self.page.query_selector_all("a[href*='/cursos/detail?course=']")
-        for enlace in enlaces:
-            nombre_elem = enlace.query_selector("span[id^='card']")
-            if not nombre_elem:
-                continue
-            course_name = nombre_elem.inner_text().strip()
-            href = enlace.get_attribute("href")
-            cursos.append((course_name, href))
+        self.page.wait_for_timeout(3000)
+        cursos = self._enlaces_de_cursos(20000)
         if not cursos:
-            logger.warning("No se encontraron enlaces a detalle de curso en /cursos")
+            cursos = self._enlaces_por_regex()
+        if not cursos:
+            logger.warning("No se encontraron enlaces a detalle de curso en /cursos "
+                           "(probé en todos los iframes, 4 patrones y regex sobre el HTML)")
+            self._volcar_debug_cursos()
             return
+        logger.info(f"Cursos detectados en MiCibertec: {len(cursos)}")
 
         # Limpiar tablas antes de insertar nuevos datos
         self.db.execute('DELETE FROM bb_grades')
@@ -411,15 +532,16 @@ class BlackboardSkill:
                 (f"c{i:02d}", course_name, datetime.now()))
 
         for course_name, href in cursos:
-            logger.info(f"Navegando a detalle de {course_name}: {href}")
-            self.page.goto(f"https://estudiante.cibertec.edu.pe{href}", wait_until="domcontentloaded", timeout=30000)
+            destino = href if href.startswith("http") else f"https://estudiante.cibertec.edu.pe{href}"
+            logger.info(f"Navegando a detalle de {course_name}: {destino}")
+            self.page.goto(destino, wait_until="domcontentloaded", timeout=30000)
             self.page.wait_for_timeout(5000)
 
             # --- HORARIOS ---
-            # La tabla de horarios tiene columnas "Fecha", "Hora", "Estado"
-            tabla_horarios = self.page.query_selector(
-                'table:has(th:has-text("Fecha")):has(th:has-text("Hora"))'
-            )
+            # La tabla de horarios tiene columnas "Fecha", "Hora", "Estado".
+            # Se busca en CUALQUIER frame (el detalle también puede ir en iframe).
+            _fr_h, tabla_horarios = self._buscar_tabla(
+                encabezados=("Fecha", "Hora"), tiempo_ms=6000)
             if tabla_horarios:
                 filas = tabla_horarios.query_selector_all('tbody tr') or tabla_horarios.query_selector_all('tr')
                 # Saltar la fila de encabezado
@@ -476,13 +598,13 @@ class BlackboardSkill:
                 logger.info(f"Horarios extraídos (método alternativo) para {course_name}")
 
             # --- EVALUACIONES (CORREGIDO) ---
-            # Buscar la tabla de notas con encabezados "Tipo", "Evaluación", "Peso", "Nota"
-            tabla_notas = self.page.query_selector(
-                'table:has(th:has-text("Tipo")):has(th:has-text("Evaluación"))'
-            )
+            # Tabla de notas con encabezados "Tipo", "Evaluación", "Peso", "Nota",
+            # buscada en cualquier frame.
+            _fr_n, tabla_notas = self._buscar_tabla(
+                encabezados=("Tipo", "Evaluación"), tiempo_ms=6000)
             if not tabla_notas:
                 # Alternativa: buscar tabla que contenga una celda con "T1"
-                tabla_notas = self.page.query_selector('table:has(td:text-is("T1"))')
+                _fr_n, tabla_notas = self._buscar_tabla(celda="T1", tiempo_ms=3000)
 
             if tabla_notas:
                 # Obtener filas (tbody o tr directamente)
