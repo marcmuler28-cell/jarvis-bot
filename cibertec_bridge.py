@@ -193,7 +193,8 @@ def fmt_calendario(filas):
 _RE_NOTAS = re.compile(r"\b(notas|calificaciones|gradebook|promedios?)\b")
 _RE_CURSOS = re.compile(r"\b(cursos|matricula|matriculado|matriculados)\b")
 _RE_MENSAJES = re.compile(
-    r"\b(mensajes|bandeja|conversaciones)\b.*(aula|cibertec|blackboard|universidad|profes?)\b")
+    r"^(?:mis\s+)?(?:mensajes|bandeja|conversaciones)\b"
+    r"|\b(?:mensajes|bandeja|conversaciones)\b.*(aula|cibertec|blackboard|universidad|profes?)\b")
 _RE_CALENDARIO = re.compile(
     r"\b(calendario|agenda|evaluaciones?|examenes?|practicas?)\b"
     r".*(aula|cibertec|blackboard|universidad|este ciclo)\b|\b(calendario|evaluaciones|examenes)\b")

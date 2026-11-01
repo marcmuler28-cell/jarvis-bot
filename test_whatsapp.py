@@ -292,6 +292,23 @@ class TestYoYEscucha(BaseWa):
         self.assertEqual(ts, 0)
         self.assertEqual(enviados, [])
 
+    def test_procesar_ignora_el_eco_de_sus_respuestas(self):
+        # La respuesta de Jarvis vuelve a entrar por el chat propio: no debe
+        # re-respondersela (bucle Jarvis <-> Jarvis de las capturas del bug).
+        vistos = collections.deque(maxlen=50)
+        propios = collections.deque(maxlen=10)
+        enviados = []
+        menu = wa.RESPUESTA_POR_DEFECTO
+        ts1 = wa.procesar_mensajes([{"id": "A", "ts": 100, "texto": "ayuda"}],
+                                   vistos, cb=self._fake_cb(None),
+                                   enviar_fn=enviados.append, propios=propios)
+        self.assertEqual(enviados, [menu])
+        ts2 = wa.procesar_mensajes([{"id": "B", "ts": 101, "texto": menu}],
+                                   vistos, cb=self._fake_cb(None),
+                                   enviar_fn=enviados.append, propios=propios)
+        self.assertEqual(enviados, [menu])  # NO responde a su propio menú
+        self.assertEqual(ts2, 101)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

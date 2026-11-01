@@ -49,6 +49,8 @@ let authYaAvisado = false;
 const arrancadoEn = Math.floor(Date.now() / 1000);
 const colaChat = [];              // {id, ts, texto} — solo el chat propio
 const idsDelPuente = new Set();   // ids que ESTE puente envió (para no re-leerlos)
+let ultimoTextoEnviado = "";      // eco: si WhatsApp no confirma el id, igual
+let ultimoEnvioTs = 0;            // reconocemos nuestra respuesta por su TEXTO
 
 /** true si el mensaje es un «estado» de WhatsApp o un broadcast, no un chat */
 function esEstado(msg) {
@@ -113,6 +115,10 @@ client.on('message_create', (msg) => {
   if ((msg.timestamp || 0) < arrancadoEn) return;      // historial viejo
   const texto = String(msg.body || '').trim();
   if (!texto) return;
+  // ANTI-BUCLE: si WhatsApp no nos dio el id del envío, la respuesta vuelve
+  // a entrar por aquí; la reconocemos por su texto (2 min de ventana).
+  const ahora = Math.floor(Date.now() / 1000);
+  if (texto === ultimoTextoEnviado && ahora - ultimoEnvioTs < 120) return;
   colaChat.push({ id: serial || '', ts: msg.timestamp || arrancadoEn, texto });
   if (colaChat.length > 200) colaChat.splice(0, colaChat.length - 200);
   log('💬 TÚ (chat propio):', texto.slice(0, 80));
@@ -233,6 +239,8 @@ async function enviar(to, message) {
   }
 
   const idSer = enviado && enviado.id ? (enviado.id._serialized || enviado.id.id) : null;
+  ultimoTextoEnviado = texto.slice(0, 500); // para reconocer el eco aunque no haya id
+  ultimoEnvioTs = Math.floor(Date.now() / 1000);
   if (!idSer) {
     // Sin excepción y a ti mismo = entregado aunque WhatsApp no confirme.
     if (esPropio && (errores.length === 0 || directoSinError)) {

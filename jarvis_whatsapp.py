@@ -64,7 +64,11 @@ def _cargar_env(ruta=None):
                 clave, _, valor = linea.partition("=")
                 clave = clave.strip()
                 valor = valor.strip().strip('"').strip("'")
-                if clave and clave not in os.environ:
+                if clave and clave not in os.environ \
+                        and not clave.startswith("JARVIS_DB_"):
+                    # JARVIS_DB_* se EXCLUYE a propósito: database.py los lee del
+                    # .env al conectarse (load_dotenv); si los cacheamos aquí,
+                    # el oyente se queda con la contraseña vieja hasta reiniciar.
                     os.environ[clave] = valor
     except OSError:
         pass
@@ -456,9 +460,14 @@ def responder_como_jarvis(texto, cb=None):
     return RESPUESTA_POR_DEFECTO
 
 
-def procesar_mensajes(mensajes, vistos, cb=None, enviar_fn=None):
+def procesar_mensajes(mensajes, vistos, cb=None, enviar_fn=None, propios=None):
     """Procesa la lista {id, ts, texto} que trae el puente; responde UNA vez
-    por id (vistos: deque de ids ya contestados). Devuelve el mayor ts visto."""
+    por id (vistos: deque de ids ya contestados). Devuelve el mayor ts visto.
+    propios: deque de textos que NOSOTROS enviamos — si un mensaje entrante es
+    igual (eco del chat propio), se ignora para no responder en bucle."""
+    import collections
+    if propios is None:
+        propios = collections.deque(maxlen=10)
     enviar_fn = enviar_fn or (lambda txt: enviar("yo", txt))
     ultimo_ts = 0
     for m in mensajes or []:
@@ -469,11 +478,14 @@ def procesar_mensajes(mensajes, vistos, cb=None, enviar_fn=None):
         if not texto or not mid or mid in vistos:
             continue
         vistos.append(mid)
+        if _norm(texto)[:120] in propios:
+            continue  # es nuestra propia respuesta que volvió (anti-bucle)
         r = responder_como_jarvis(texto, cb=cb)
         if r:
             print(f"   🤖 respondo: {str(r).splitlines()[0][:60]}", flush=True)
             salida = enviar_fn(r)
             print(f"      {str(salida).splitlines()[0][:90]}", flush=True)
+            propios.append(_norm(str(r))[:120])
     return ultimo_ts
 
 
@@ -485,6 +497,7 @@ def escuchar():
     print("👂 Jarvis escucha tu chat propio. Escríbete «ayuda» desde el celular "
           "(Ctrl+C para salir).", flush=True)
     vistos = collections.deque(maxlen=200)
+    propios = collections.deque(maxlen=10)   # respuestas nuestras (anti-bucle)
     desde = int(time.time())
     cb = _modulo_cibertec()
     aviso_puente = False
@@ -492,7 +505,8 @@ def escuchar():
         try:
             d = _get(f"/mensajes?desde={desde}", timeout=15)
             aviso_puente = False
-            nuevo = procesar_mensajes(d.get("mensajes"), vistos, cb=cb)
+            nuevo = procesar_mensajes(d.get("mensajes"), vistos, cb=cb,
+                                      propios=propios)
             if nuevo > desde:
                 desde = nuevo
         except KeyboardInterrupt:

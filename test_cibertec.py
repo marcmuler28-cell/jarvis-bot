@@ -88,7 +88,7 @@ class TestParser(unittest.TestCase):
     def test_frases_validas(self):
         for frase in ("mis notas", "ver notas", "mis calificaciones",
                       "mis cursos", "que cursos llevo este ciclo",
-                      "mensajes del aula", "bandeja cibertec",
+                      "mensajes del aula", "bandeja cibertec", "mis mensajes",
                       "calendario del aula", "mis evaluaciones"):
             self.assertIsNotNone(cb.intentar(frase), frase)
 
