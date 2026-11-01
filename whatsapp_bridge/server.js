@@ -136,6 +136,10 @@ client.on('message_create', (msg) => {
 client.initialize().catch((e) => {
   iniciando = false;
   log('ERROR al iniciar el cliente:', e && e.message);
+  if (String((e && e.message) || '').includes('already running')) {
+    log('  → quedó un chromium del puente anterior con el perfil tomado.');
+    log('    En otra terminal:  pkill -f wwebjs_auth    y vuelve a lanzar ./iniciar.sh');
+  }
 });
 
 // ── HTTP ─────────────────────────────────────────────────────────────

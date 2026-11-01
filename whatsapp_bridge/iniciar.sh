@@ -28,6 +28,15 @@ for c in /usr/bin/chromium /usr/bin/chromium-browser /usr/bin/google-chrome-stab
   if [ -x "$c" ]; then export CHROME_PATH="$c"; break; fi
 done
 
+# 3b) Limpieza de restos: si quedó un puente viejo en el puerto o un
+#     chromium huérfano del puente anterior, el nuevo arranca sin sesión
+#     («The browser is already running» / EADDRINUSE). fuser mata al que
+#     escucha el puerto; pkill wwebjs_auth mata SOLO al chromium cuyo
+#     perfil es el de este puente (no toca tu navegador normal).
+fuser -k "${JARVIS_WA_BRIDGE_PORT:-5015}/tcp" 2>/dev/null || true
+pkill -f "wwebjs_auth" 2>/dev/null || true
+sleep 2
+
 # 4) Escucha de TU chat propio: te escribes desde el celular y Jarvis responde
 #    («mis notas», «ayuda»...). Log en ~/.jarvis/wa_escucha.log
 #    IMPORTANTE: correr con el python del VENV (tiene mysql-connector y
