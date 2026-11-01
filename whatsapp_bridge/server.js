@@ -48,6 +48,8 @@ let authYaAvisado = false;
 // Chat propio: mensajes que MARC escribe a sí mismo desde el celular.
 const arrancadoEn = Math.floor(Date.now() / 1000);
 const colaChat = [];              // {id, ts, texto} — solo el chat propio
+const idsChat = new Set();        // ids YA capturados (message_create a veces
+                                  // dispara 2× por el mismo mensaje)
 const idsDelPuente = new Set();   // ids que ESTE puente envió (para no re-leerlos)
 let ultimoTextoEnviado = "";      // eco: si WhatsApp no confirma el id, igual
 let ultimoEnvioTs = 0;            // reconocemos nuestra respuesta por su TEXTO
@@ -119,6 +121,13 @@ client.on('message_create', (msg) => {
   // a entrar por aquí; la reconocemos por su texto (2 min de ventana).
   const ahora = Math.floor(Date.now() / 1000);
   if (texto === ultimoTextoEnviado && ahora - ultimoEnvioTs < 120) return;
+  // anti-duplicado por id: si ya capturamos ESTE mensaje, no lo re-encolamos
+  // (dos copias en la cola harían que el oyente lo procese dos veces)
+  if (serial && idsChat.has(serial)) return;
+  if (serial) {
+    idsChat.add(serial);
+    if (idsChat.size > 2000) { idsChat.clear(); for (const m of colaChat) if (m.id) idsChat.add(m.id); }
+  }
   colaChat.push({ id: serial || '', ts: msg.timestamp || arrancadoEn, texto });
   if (colaChat.length > 200) colaChat.splice(0, colaChat.length - 200);
   log('💬 TÚ (chat propio):', texto.slice(0, 80));

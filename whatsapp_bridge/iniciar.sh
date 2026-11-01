@@ -30,11 +30,16 @@ done
 
 # 4) Escucha de TU chat propio: te escribes desde el celular y Jarvis responde
 #    («mis notas», «ayuda»...). Log en ~/.jarvis/wa_escucha.log
+#    IMPORTANTE: correr con el python del VENV (tiene mysql-connector y
+#    python-dotenv); con el python del sistema el aula responde «sin datos».
 if command -v python3 >/dev/null 2>&1; then
+  RAIZ="$(cd .. && pwd)"
+  PY="$RAIZ/venv_linux/bin/python"
+  [ -x "$PY" ] || PY="$(command -v python3)"
   pkill -f "jarvis_whatsapp.py escuchar" 2>/dev/null || true
   mkdir -p "$HOME/.jarvis"
-  (cd .. && nohup python3 jarvis_whatsapp.py escuchar >> "$HOME/.jarvis/wa_escucha.log" 2>&1 & disown) || true
-  echo "👂 Escucha de tu chat propio lanzada (log: ~/.jarvis/wa_escucha.log)"
+  (cd .. && nohup "$PY" jarvis_whatsapp.py escuchar >> "$HOME/.jarvis/wa_escucha.log" 2>&1 & disown) || true
+  echo "👂 Escucha de tu chat propio lanzada con $(basename "$PY") (log: ~/.jarvis/wa_escucha.log)"
 fi
 
 echo "▶ Puente de WhatsApp escuchando en 127.0.0.1:5015  (Ctrl+C para parar)"

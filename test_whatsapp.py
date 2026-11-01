@@ -310,5 +310,57 @@ class TestYoYEscucha(BaseWa):
         self.assertEqual(ts2, 101)
 
 
+# ─────────────────────────────────────────────────────────────
+# Un solo oyente: el bug de las «respuestas dobles»
+# ─────────────────────────────────────────────────────────────
+
+class TestOyenteUnico(unittest.TestCase):
+    def setUp(self):
+        self.ruta = os.path.join(TMP, "escucha.lock")
+        os.environ["JARVIS_WA_ESCUCHA_LOCK"] = self.ruta
+        importlib.reload(wa)
+
+    def tearDown(self):
+        os.environ.pop("JARVIS_WA_ESCUCHA_LOCK", None)
+        importlib.reload(wa)
+
+    def test_segundo_oyente_se_retira(self):
+        primero = wa._lock_escucha()
+        self.assertIsNotNone(primero)
+        try:
+            # dos oyentes a la vez = Jarvis responde DOS veces (bug de marc)
+            self.assertIsNone(wa._lock_escucha())
+        finally:
+            if primero not in (None, "sin-lock"):
+                primero.close()
+        # liberado el cerrojo, un oyente nuevo vuelve a poder arrancar
+        segundo = wa._lock_escucha()
+        self.assertIsNotNone(segundo)
+        if segundo not in (None, "sin-lock"):
+            segundo.close()
+
+    def test_escuchar_no_arranca_si_hay_otro(self):
+        dueno = wa._lock_escucha()
+        if dueno == "sin-lock":
+            self.skipTest("SO sin flock")
+        self.assertIsNotNone(dueno)
+        try:
+            import contextlib
+            import io
+            salida = io.StringIO()
+            with contextlib.redirect_stdout(salida):
+                wa.escuchar()   # debe avisar y VOLVER, no colgarse ni escuchar
+            self.assertIn("OTRO oyente", salida.getvalue())
+        finally:
+            if dueno not in (None, "sin-lock"):
+                dueno.close()
+
+    def test_diagnostico_no_revienta(self):
+        texto = wa._diagnostico("mis cursos")
+        self.assertIn("Diagnóstico", texto)
+        self.assertIn("python", texto)
+        self.assertIn("respuesta", texto)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

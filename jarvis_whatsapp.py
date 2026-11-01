@@ -35,6 +35,7 @@ CLI de prueba:
   python3 jarvis_whatsapp.py enviar mama "ya llegué"
   python3 jarvis_whatsapp.py enviar yo "nota mental"
   python3 jarvis_whatsapp.py escuchar   # responde lo que te escribas a ti mismo
+  python3 jarvis_whatsapp.py probar "mis cursos"   # diagnóstico del aula (BD, tablas)
 """
 
 import difflib
@@ -489,13 +490,93 @@ def procesar_mensajes(mensajes, vistos, cb=None, enviar_fn=None, propios=None):
     return ultimo_ts
 
 
+def _diagnostico(texto):
+    """Qué pasa por dentro cuando Jarvis recibe `texto` (CLI «probar»).
+
+    Imprime: python usado, si cibertec_bridge importa, si MySQL conecta,
+    cuántas filas hay en cada tabla bb_* y la respuesta final. Es la forma
+    rápida de ver en la PC por qué «mis cursos» dice que no hay datos.
+    """
+    import sys
+    lineas = [f"🔎 Diagnóstico para: «{texto}»",
+              f"  python        : {sys.executable}"]
+    cb = _modulo_cibertec()
+    lineas.append("  cibertec      : " + ("importa OK" if cb is not None else
+                   "NO importa → usa venv_linux/bin/python"))
+    nombre_bd = ""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+                  encoding="utf-8") as f:
+            for linea in f:
+                if linea.strip().startswith("JARVIS_DB_NAME"):
+                    nombre_bd = linea.partition("=")[2].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    lineas.append(f"  BD del .env   : {nombre_bd or '(sin JARVIS_DB_NAME)'}")
+    db = None
+    if cb is not None:
+        try:
+            db = cb._db()
+        except Exception as e:
+            lineas.append(f"  base de datos : ERROR al conectar ({e})")
+    if db is None:
+        lineas.append("  base de datos : NO conecta desde este python")
+    else:
+        lineas.append("  base de datos : conecta ✔")
+        for tabla in ("bb_courses", "bb_grades", "bb_schedules", "bb_messages"):
+            try:
+                n = db.query(f"SELECT COUNT(*) FROM {tabla}")
+                lineas.append(f"  {tabla + ':':16}{n[0][0]} filas")
+            except Exception:
+                lineas.append(f"  {tabla + ':':16}no existe")
+    r = responder_como_jarvis(texto)
+    lineas.append("  ── respuesta ──")
+    lineas.append("  " + (r or "(ninguna)").replace("\n", "\n  "))
+    return "\n".join(lineas)
+
+
+def _lock_escucha():
+    """Cerrojo anti-dobles: SOLO UN oyente puede responder a la vez.
+
+    Si dos copias del oyente viven a la vez (p. ej. una lanzada a mano y
+    otra por iniciar.sh), CADA una responde a cada mensaje → Jarvis «habla
+    dos veces». Aquí usamos flock(2): el 2.º proceso que llegue obtiene
+    EWOULDBLOCK y se retira. Devuelve el archivo abierto (mantenerlo mientras
+    se escucha) o None si ya hay otro oyente; "sin-lock" si el SO no soporta
+    flock (mejor escuchar sin cerrojo que quedarse mudo).
+    """
+    import fcntl  # POSIX (Linux/macOS); en Windows cae al except de abajo
+    ruta = os.environ.get("JARVIS_WA_ESCUCHA_LOCK",
+                          os.path.join(os.path.expanduser("~"), ".jarvis", "wa_escucha.lock"))
+    try:
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        f = open(ruta, "w")
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            f.close()
+            return None
+        f.write(str(os.getpid()))
+        f.truncate()
+        f.flush()
+        return f
+    except OSError:
+        return "sin-lock"
+
+
 def escuchar():
     """Bucle: lee TU chat propio desde el puente y responde como Jarvis.
     Escríbete «ayuda» desde el celular para ver qué entiende."""
     import collections
     import time
-    print("👂 Jarvis escucha tu chat propio. Escríbete «ayuda» desde el celular "
-          "(Ctrl+C para salir).", flush=True)
+    cerrojo = _lock_escucha()
+    if cerrojo is None:
+        print("⚠️ Ya hay OTRO oyente de WhatsApp corriendo; este no arranca "
+              "(dos oyentes a la vez = respuestas dobles). Para verlo: "
+              "pgrep -af 'jarvis_whatsapp.py escuchar'", flush=True)
+        return
+    print(f"👂 Jarvis escucha tu chat propio (PID {os.getpid()}). "
+          "Escríbete «ayuda» desde el celular (Ctrl+C para salir).", flush=True)
     vistos = collections.deque(maxlen=200)
     propios = collections.deque(maxlen=10)   # respuestas nuestras (anti-bucle)
     desde = int(time.time())
@@ -556,6 +637,10 @@ if __name__ == "__main__":
             print(enviar(sys.argv[2], sys.argv[3]))
         elif cmd == "escuchar":
             escuchar()
+        elif cmd == "probar" and len(sys.argv) >= 3:
+            print(_diagnostico(" ".join(sys.argv[2:])))
+        elif cmd == "probar":
+            print(_diagnostico("mis cursos"))
         else:
             print(__doc__)
     else:

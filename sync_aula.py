@@ -37,8 +37,22 @@ def main():
 
     try:
         s.fetch_all_data()
-        print("✅ Sincronización completa: cursos, mensajes, horarios y notas en MySQL.")
-        print("   Ahora pregunta por WhatsApp: «mis notas», «mis mensajes», «mi horario».")
+        print("✅ Sincronización terminada. Contenido REAL por tabla:")
+        vacias = []
+        for tabla in ("bb_courses", "bb_grades", "bb_schedules", "bb_messages"):
+            try:
+                n = s.db.query(f"SELECT COUNT(*) FROM {tabla}")[0][0]
+                print(f"   • {tabla + ':':14}{n} filas")
+                if not n:
+                    vacias.append(tabla)
+            except Exception:
+                print(f"   • {tabla + ':':14}no existe")
+        if vacias:
+            print(f"⚠️  Tablas VACÍAS: {', '.join(vacias)}. Eso que preguntas por "
+                  "WhatsApp seguirá diciendo «sin datos» hasta que el sync las "
+                  "llene (revisa los warnings de arriba).")
+        else:
+            print("   Ahora pregunta por WhatsApp: «mis notas», «mis mensajes», «mi horario».")
         return 0
     except Exception as e:
         print(f"❌ Error durante la sincronización: {e}")
